@@ -136,7 +136,11 @@ __global__ void kernelPixelDetector( Geometry geo,
     Point3D deltaU = projParamsArrayDev[4*projNumber+1];
     Point3D deltaV = projParamsArrayDev[4*projNumber+2];
     Point3D source = projParamsArrayDev[4*projNumber+3];
-    
+
+    // changing source for each u, v
+    source.z+= (v - (float)(geo.nDetecV - 1)/2 ) * geo.EPS * geo.DSD[projNumber] / (geo.DSD[projNumber]-geo.DSO[projNumber]) / geo.dVoxelZ;
+    source.y+= (u - (float)(geo.nDetecU - 1)/2 ) * geo.EPS * geo.DSD[projNumber] / (geo.DSD[projNumber]-geo.DSO[projNumber]) / geo.dVoxelY;
+
     /////// Get coordinates XYZ of pixel UV
     unsigned long pixelV = geo.nDetecV-v-1;
     unsigned long pixelU = u;
@@ -404,7 +408,7 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
         unsigned int proj_global;
         // Now that we have prepared the image (piece of image) and parameters for kernels
         // we project for all angles.
-        for (unsigned int i=0; i<noOfKernelCalls; i++) {
+        for (unsigned int i=0; i<noOfKernelCalls; i++) { // Iterating over all 720 projs
             for (dev=0;dev<deviceCount;dev++){
                 cudaSetDevice(gpuids[dev]);
                 
