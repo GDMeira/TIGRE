@@ -141,7 +141,7 @@ void mexFunction(int  nlhs , mxArray *plhs[],
     mxArray * geometryMex=(mxArray*)prhs[1];
     
     // IMPORTANT-> Make sure Matlab creates the struct in this order.
-    const char *fieldnames[14];
+    const char *fieldnames[15];
     fieldnames[0] = "nVoxel";
     fieldnames[1] = "sVoxel";
     fieldnames[2] = "dVoxel";
@@ -156,11 +156,12 @@ void mexFunction(int  nlhs , mxArray *plhs[],
     fieldnames[11]= "mode";
     fieldnames[12]= "COR";
     fieldnames[13]= "rotDetector";
+    fieldnames[14]= "EPS";
     
     // Now we know that all the input struct is good! Parse it from mxArrays to
     // C structures that MEX can understand.
     double * nVoxel, *nDetec; //we need to cast these to int
-    double * sVoxel, *dVoxel,*sDetec,*dDetec, *DSO, *DSD;
+    double * sVoxel, *dVoxel,*sDetec,*dDetec, *DSO, *DSD, *EPS;
     double *offOrig,*offDetec,*rotDetector;
     double *  acc, *COR;
     const char* mode;
@@ -170,7 +171,7 @@ void mexFunction(int  nlhs , mxArray *plhs[],
     geo.unitX=1;geo.unitY=1;geo.unitZ=1;
     bool coneBeam=true;
 //     mexPrintf("%d \n",nfields);
-    for(int ifield=0; ifield<14; ifield++) {
+    for(int ifield=0; ifield<15; ifield++) {
         tmp=mxGetField(geometryMex,0,fieldnames[ifield]);
         if(tmp==NULL){
             //tofix
@@ -290,6 +291,12 @@ void mexFunction(int  nlhs , mxArray *plhs[],
                     
                 }
                 break;
+
+            case 14:
+                EPS=(double *)mxGetData(tmp);
+                geo.EPS=(float)EPS;
+                break;
+
             default:
                 mexErrMsgIdAndTxt( "CBCT:MEX:Ax:unknown","This should not happen. Weird");
                 break;
