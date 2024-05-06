@@ -223,21 +223,67 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
             P.x=(xyzOrigin.x+indX*deltaX.x+indY*deltaY.x+indZ*deltaZ.x);
             P.y=(xyzOrigin.y+indX*deltaX.y+indY*deltaY.y+indZ*deltaZ.y)-auxCOR;
             P.z=(xyzOrigin.z+indX*deltaX.z+indY*deltaY.z+indZ*deltaZ.z);
+
+            Point3D detector;
+            detector.x = S.x + DSD;
+            detector.y = S.y;
+            detector.z = S.z;
+
+            // TODO: otimizar a varredura dos pixels do detector
+            // OBS: talvez salvar esse valor de u, v para começar a partir dele na próxima varredura
+            float minDist = 10;
+            Point3D centerUV;
+
+            for (size_t i = 0; i < geo.nDetecU; i++)
+            {
+                for (size_t j = 0; j < geo.nDetecV; j++)
+                {
+                    Point3D dUV, SUV, intercept;
+                    dUV.x = detector.x;
+                    dUV.y = detector.y + (i - geo.nDetecU/2);
+                    dUV.z = detector.z + (j - geo.nDetecV/2);
+
+                    SUV.x = S.x;
+                    SUV.y = S.y + (i - geo.nDetecU/2) * geo.EPS * DSD/(DSD - DSO) /geo.dDetecU;
+                    SUV.z = S.z + (j - geo.nDetecV/2) * geo.EPS * DSD/(DSD - DSO) /geo.dDetecV;
+
+                    intercept.x = (P.x - dUV.x)/DSD;
+                    intercept.y = (SUV.y - dUV.y) * intercept.x + dUV.y;
+                    intercept.z = (SUV.z - dUV.z) * intercept.x + dUV.z;
+
+                    float dist = sqrtf((intercept.y - P.y) * (intercept.y - P.y) + (intercept.z - P.z) * (intercept.z - P.z));
+
+                    if (dist < minDist)
+                    {
+                        centerUV.x = dist;
+                        centerUV.y = i;
+                        centerUV.z = j;
+                    }
+                    
+                }
+                
+            }
             
-            // This is the vector defining the line from the source to the Voxel
-            float vectX,vectY,vectZ;
-            vectX=(P.x -S.x);
-            vectY=(P.y -S.y);
-            vectZ=(P.z -S.z);
+
+
+            // // This is the vector defining the line from the source to the Voxel
+            // float vectX,vectY,vectZ;
+            // vectX=(P.x -S.x);
+            // vectY=(P.y -S.y);
+            // vectZ=(P.z -S.z);
             
-            // Get the coordinates in the detector UV where the mid point of the voxel is projected.
-            float t=__fdividef(DSO-DSD-S.x,vectX);
-            float y,z;
-            y=vectY*t+S.y;
-            z=vectZ*t+S.z;
+            // // Get the coordinates in the detector UV where the mid point of the voxel is projected.
+            // float t=__fdividef(DSO-DSD-S.x,vectX);
+            // float y,z;
+            // y=vectY*t+S.y;
+            // z=vectZ*t+S.z;
+            // float u,v;
+            // u=y+(float)geo.nDetecU*0.5f;
+            // v=z+(float)geo.nDetecV*0.5f;
+
             float u,v;
-            u=y+(float)geo.nDetecU*0.5f;
-            v=z+(float)geo.nDetecV*0.5f;
+            u=(float)centerUV.y;
+            v=(float)centerUV.z;
             
             float weight;
             float realx,realy;
@@ -835,7 +881,7 @@ void computeDeltasCube(Geometry geo,int i, Point3D* xyzorigin, Point3D* deltaX, 
     deltaZ->x=Pz.x-P.x;   deltaZ->y=Pz.y-P.y;    deltaZ->z=Pz.z-P.z;
     
     
-    *xyzorigin=P;
+    *xyzorigin=P; // corner of image
     *S=source;
 }
 

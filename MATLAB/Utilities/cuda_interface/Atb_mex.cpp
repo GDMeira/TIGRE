@@ -180,6 +180,7 @@ void mexFunction(int  nlhs , mxArray *plhs[],
     fieldnames[11]= "mode";
     fieldnames[12]= "COR";
     fieldnames[13]= "rotDetector";
+    fieldnames[14]= "EPS";
     // Make sure input is structure
     
     mxArray    *tmp;
@@ -188,14 +189,14 @@ void mexFunction(int  nlhs , mxArray *plhs[],
     // C structures that MEX can understand.
     
     double * nVoxel, *nDetec; //we need to cast these to int
-    double * sVoxel, *dVoxel,*sDetec,*dDetec, *DSO, *DSD,*offOrig,*offDetec;
+    double * sVoxel, *dVoxel,*sDetec,*dDetec, *DSO, *DSD,*offOrig,*offDetec, *EPS;
     double *acc, *COR,*rotDetector;
     const char* mode;
     bool coneBeam=true;
     Geometry geo;
     int c;
     geo.unitX=1;geo.unitY=1;geo.unitZ=1;
-    for(int ifield=0; ifield<14; ifield++) {
+    for(int ifield=0; ifield<15; ifield++) {
         tmp=mxGetField(geometryMex,0,fieldnames[ifield]);
         if(tmp==NULL){
             //tofix
@@ -314,6 +315,12 @@ void mexFunction(int  nlhs , mxArray *plhs[],
                     
                 }
                 break;
+
+            case 14:
+                EPS=(double *)mxGetData(tmp);
+                geo.EPS=(float)EPS;
+                break;
+                
             default:
                 mexErrMsgIdAndTxt( "CBCT:MEX:Atb:unknown","This should not happen. Weird");
                 break;
