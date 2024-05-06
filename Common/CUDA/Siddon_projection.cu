@@ -138,8 +138,8 @@ __global__ void kernelPixelDetector( Geometry geo,
     Point3D source = projParamsArrayDev[4*projNumber+3];
 
     // changing source for each u, v
-    source.z+= (v - (float)(geo.nDetecV - 1)/2 ) * geo.EPS * geo.DSD[projNumber] / (geo.DSD[projNumber]-geo.DSO[projNumber]) / geo.dVoxelZ;
-    source.y+= (u - (float)(geo.nDetecU - 1)/2 ) * geo.EPS * geo.DSD[projNumber] / (geo.DSD[projNumber]-geo.DSO[projNumber]) / geo.dVoxelY;
+    source.z+= v * geo.EPS * geo.DSD[projNumber] / (geo.DSD[projNumber]-geo.DSO[projNumber]) / geo.dVoxelZ;
+    source.y+= u * geo.EPS * geo.DSD[projNumber] / (geo.DSD[projNumber]-geo.DSO[projNumber]) / geo.dVoxelY;
 
     /////// Get coordinates XYZ of pixel UV
     unsigned long pixelV = geo.nDetecV-v-1;
