@@ -58,6 +58,7 @@ struct  Geometry {
     float dVoxelX, dVoxelY, dVoxelZ;
     float *offOrigX,*offOrigY,*offOrigZ;
     float* DSO;
+    float EPS;
     // Parameters  of the Detector.
     int   nDetecU, nDetecV;
     float sDetecU, sDetecV;
@@ -71,6 +72,11 @@ struct  Geometry {
     float unitX;
     float unitY;
     float unitZ;
+
+    // Parameter of refraction
+    float gelTubeRadius;
+    float nWater;
+    float nGel;
     
     //rotation angle for e uler (ZYZ)
     float alpha;

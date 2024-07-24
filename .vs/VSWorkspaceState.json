@@ -1,0 +1,13 @@
+{
+  "ExpandedNodes": [
+    "",
+    "\\Common",
+    "\\Common\\CUDA",
+    "\\MATLAB",
+    "\\MATLAB\\Mex_files",
+    "\\MATLAB\\Utilities",
+    "\\MATLAB\\Utilities\\cuda_interface"
+  ],
+  "SelectedNode": "\\Common\\CUDA\\types_TIGRE.hpp",
+  "PreviewInSolutionExplorer": false
+}

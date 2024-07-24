@@ -137,7 +137,7 @@ for ii=1:niter
         ynesterov=res + bsxfun(@times,1./V,Atb(W.*(proj-Ax(res,geo,angles,'gpuids',gpuids)),geo,angles,'gpuids',gpuids));
         res=(1-gamma)*ynesterov+gamma*ynesterov_prev;
     else
-        res=res+lambda*bsxfun(@times,1./V,Atb(W.*(proj-Ax(res,geo,angles,'gpuids',gpuids)),geo,angles,'gpuids',gpuids)); % x= x + lambda * V * At * W^-1 * (b-Ax)
+        res=res+lambda*bsxfun(@times,1./V,Atb(W.*(proj - Ax(res,geo,angles,'gpuids',gpuids)),geo,angles,'gpuids',gpuids)); % x= x + lambda * V * At * W^-1 * (b-Ax)
     end
     % ------------------------------------
     

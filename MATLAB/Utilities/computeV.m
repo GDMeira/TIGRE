@@ -17,9 +17,9 @@ if ~isfield(geo,'mode')||~strcmp(geo.mode,'parallel')
         auxindex=orig_index{ii};
         auxgeo = geo;
         % expand the detector to avoiding zeros in backprojection
-        maxsize=max(auxgeo.sVoxel+geo.offOrigin(:,auxindex),[],2);
-        auxgeo.sDetector=max(auxgeo.sDetector , [maxsize(1); maxsize(3)] *geo.DSD/geo.DSO);
-        auxgeo.dDetector = auxgeo.sDetector ./ auxgeo.nDetector;
+        % maxsize=max(auxgeo.sVoxel+geo.offOrigin(:,auxindex),[],2);
+        % auxgeo.sDetector=max(auxgeo.sDetector , [maxsize(1); maxsize(3)] *geo.DSD/geo.DSO);
+        % auxgeo.dDetector = auxgeo.sDetector ./ auxgeo.nDetector;
         % subset of projection angles
         auxgeo.DSD = geo.DSD(auxindex);
         auxgeo.DSO = geo.DSO(auxindex);
