@@ -46,7 +46,7 @@
  * Codes  : https://github.com/CERN/TIGRE
  * ---------------------------------------------------------------------------
  */
-
+#define  PI_4 0.78539816
 #include <algorithm>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
@@ -110,7 +110,7 @@ __global__ void vecAddInPlace(float *a, float *b, unsigned long  n)
 __device__ void setNewDirections(
     Point3D& ray, Geometry geo, unsigned long i, unsigned long j, unsigned long k, float& iu, float& ju, float& ku, float iNext, float jNext, float kNext,
     float& axu, float& ayu, float& azu, float& ax, float& ay, float& az, float& ac, bool& rayGotPrisioned, float nIncidence, float nRefraction, float tubeRadius,
-    float& traveledLength
+    float& aminc, float& traveledLength
 ){
     float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
     Point3D v1, P, C, n, N, v2, nextPoint;
@@ -140,7 +140,7 @@ __device__ void setNewDirections(
     if (incidenceAngle == 0) return;
 
     float refractionAngle = asinf(nIncidence * sinf(incidenceAngle) / nRefraction);
-    if (refractionAngle > PI/2) {
+    if (refractionAngle > PI_4) {
         rayGotPrisioned = true;
         return;
     }
@@ -185,7 +185,7 @@ __device__ void setNewDirections(
     float aux1 = -2 * aux.x * v2.x - 2 * aux.y * v2.y;
     aux1 = aux1*aux1;
     float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y);
-    float aux3 = (gelTubeRadius * gelTubeRadius - aux.x * aux.x - aux.y * aux.y);
+    float aux3 = (tubeRadius * tubeRadius - aux.x * aux.x - aux.y * aux.y);
     float aux4 = 2 * aux.x * v2.x + 2 * aux.y * v2.y;
     float aux5 = 2 * (v2.x * v2.x + v2.y * v2.y);
 
@@ -307,8 +307,8 @@ __global__ void kernelPixelDetector( Geometry geo,
     Point3D deltaU = projParamsArrayDev[6 * projNumber + 1];
     Point3D deltaV = projParamsArrayDev[6 * projNumber + 2];
     Point3D source = projParamsArrayDev[6 * projNumber + 3];
-    Point3D aux = projParamsArrayDev[6 * projNumber + 4];
-    Point3D aux2 = projParamsArrayDev[6 * projNumber + 5];
+    Point3D auxParams1 = projParamsArrayDev[6 * projNumber + 4];
+    Point3D auxParams2 = projParamsArrayDev[6 * projNumber + 5];
 
     /////// Get coordinates XYZ of pixel UV
     unsigned long pixelV = geo.nDetecV-v-1;
@@ -321,12 +321,12 @@ __global__ void kernelPixelDetector( Geometry geo,
     // changing source for each u, v
     // o (0,0,0) est� no canto da imagem, uvorigem � o canto do detector nessa geometria
 
-    float gelTubeRadius = aux2.x/geo.dVoxelX; //aux2.x;
-    float nWater = aux2.y; //aux2.y;
-    float nGel = aux2.z; //aux2.z;
-    float DSD = aux.x;
-    float DSO = aux.y;
-    float EPS = aux.z;
+    float gelTubeRadius = auxParams2.x/geo.dVoxelX; //aux2.x;
+    float nWater = auxParams2.y; //aux2.y;
+    float nGel = auxParams2.z; //aux2.z;
+    float DSD = auxParams1.x;
+    float DSO = auxParams1.y;
+    float EPS = auxParams1.z;
     float h = geo.dDetecU * (DSD - DSO) / (EPS - geo.dDetecU);
     float fGrowth = EPS * (DSD + h) / (DSD - DSO + h);
 
@@ -361,6 +361,11 @@ __global__ void kernelPixelDetector( Geometry geo,
     ray.y=pixel1D.y - newSource.y;
     ray.z=pixel1D.z - newSource.z;
 
+    float eps=0.001;
+    ray.x=(fabsf(ray.x)<eps)? 0 : ray.x;
+    ray.y=(fabsf(ray.y)<eps)? 0 : ray.y;
+    ray.z=(fabsf(ray.z)<eps)? 0 : ray.z;
+
     // if ray dont pass thrugh gel tube, return 0
     if (ray.y*0.5f + newSource.y < geo.nVoxelY/2 - gelTubeRadius || ray.y*0.5f + newSource.y > geo.nVoxelY/2 + gelTubeRadius) {
         detector[idx] = 0;
@@ -372,12 +377,12 @@ __global__ void kernelPixelDetector( Geometry geo,
     Q.y = newSource.y - geo.nVoxelY/2;
     Q.z = 0;
 
-    float aux1 = -2 * Q.x * v2.x - 2 * Q.y * v2.y;
+    float aux1 = -2 * Q.x * ray.x - 2 * Q.y * ray.y;
     aux1 = aux1*aux1;
-    float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y);
+    float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y);
     float aux3 = (gelTubeRadius * gelTubeRadius - Q.x * Q.x - Q.y * Q.y);
-    float aux4 = 2 * Q.x * v2.x + 2 * Q.y * v2.y;
-    float aux5 = 2 * (v2.x * v2.x + v2.y * v2.y);
+    float aux4 = 2 * Q.x * ray.x + 2 * Q.y * ray.y;
+    float aux5 = 2 * (ray.x * ray.x + ray.y * ray.y);
 
     float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
     float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
@@ -391,10 +396,6 @@ __global__ void kernelPixelDetector( Geometry geo,
     Q2.y = newSource.y + a2 * ray.y;
     Q2.z = newSource.z + a2 * ray.z;
 
-    float eps=0.001;
-    ray.x=(fabsf(ray.x)<eps)? 0 : ray.x;
-    ray.y=(fabsf(ray.y)<eps)? 0 : ray.y;
-    ray.z=(fabsf(ray.z)<eps)? 0 : ray.z;
     // This variables are ommited because
     // bx,by,bz ={0,0,0}
     // dx,dy,dz ={1,1,1}
@@ -478,8 +479,8 @@ __global__ void kernelPixelDetector( Geometry geo,
     ju=(newSource.y< pixel1D.y)? 1.0f : -1.0f;
     ku=(newSource.z< pixel1D.z)? 1.0f : -1.0f;
     
-    float traveledLength = 0.0f;
     float sum=0.0f;
+    float traveledLength;
     unsigned long Np=(imax-imin+1)+(jmax-jmin+1)+(kmax-kmin+1); // Number of intersections
     // Go iterating over the line, intersection by intersection. If double point, no worries, 0 will be computed
     i+=0.5f;
@@ -491,33 +492,32 @@ __global__ void kernelPixelDetector( Geometry geo,
     bool rayGotPrisioned = false;
     bool rayHasExited = false;
 
-    while (!rayHasExited){
+    while (!rayHasExited && !rayGotPrisioned){
 
         if (!rayHasRefracted) {
             if (ax==aminc){
-                    rayHasRefracted = true;
-                    setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, traveledLength);
+                rayHasRefracted = true;
+                setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
             }else if(ay==aminc){
-                    rayHasRefracted = true;
-                    setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j+ju, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, traveledLength);
+                rayHasRefracted = true;
+                setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j+ju, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
             }else if(az==aminc){
-                k=k+ku;
-                ac=az;
-                az+=azu;
+                rayHasRefracted = true;
+                setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j, k+ku, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
             }
         } else { //has refracted
-            float givenDistanceToTubeCenterSquare = (i - geo.nVoxelX/2)*(i - geo.nVoxelX/2)+(j - geo.nVoxelY/2)*(j - geo.nVoxelY/2);
+            float givenDistanceToTubeCenterSquare = (i - geo.nVoxelX*0.5f)*(i - geo.nVoxelX*0.5f)+(j - geo.nVoxelY*0.5f)*(j - geo.nVoxelY*0.5f);
 
             if (ax==aminc){
                 sum+=(ax-ac)*tex3D<float>(tex, i, j, k);
                 float nextDistanceToTubeCenterSquare = (i+iu - geo.nVoxelX/2)*(i+iu - geo.nVoxelX/2)+(j - geo.nVoxelY/2)*(j - geo.nVoxelY/2);
 
                 if(
-                    givenDistanceToTubeCenterSquare < gelTubeRadiusSquare
+                    givenDistanceToTubeCenterSquare <= gelTubeRadiusSquare
                     && nextDistanceToTubeCenterSquare > gelTubeRadiusSquare
                 ){
                     rayHasExited = true;
-                    setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, traveledLength);
+                    setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
                 }
 
                 i=i+iu;
@@ -525,14 +525,14 @@ __global__ void kernelPixelDetector( Geometry geo,
                 ax+=axu;
             }else if(ay==aminc){
                 sum+=(ay-ac)*tex3D<float>(tex, i, j, k);
-                float nextDistanceToTubeCenterSquare = (i - geo.nVoxelX/2)*(i - geo.nVoxelX/2)+(j+ju - geo.nVoxelY/2)*(j+ju - geo.nVoxelY/2);
+                float nextDistanceToTubeCenterSquare = (i - geo.nVoxelX*0.5f)*(i - geo.nVoxelX*0.5f)+(j+ju - geo.nVoxelY*0.5f)*(j+ju - geo.nVoxelY*0.5f);
 
                 if(
-                    givenDistanceToTubeCenterSquare < gelTubeRadiusSquare
+                    givenDistanceToTubeCenterSquare <= gelTubeRadiusSquare
                     && nextDistanceToTubeCenterSquare > gelTubeRadiusSquare
                 ){
                     rayHasExited = true;
-                    setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, traveledLength);
+                    setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
                 }
 
                 j=j+ju;
@@ -592,9 +592,8 @@ __global__ void kernelPixelDetector( Geometry geo,
     v = (unsigned long long)floorf(b);
     idx =  (size_t)(u * (unsigned long long)geo.nDetecV + v)+ projNumber*(unsigned long long)geo.nDetecV *(unsigned long long)geo.nDetecU ;
 
-    //calcular novo idx usando ray (novo pixel atingido no detector)
     float oldValue = detector[idx] ? detector[idx] : 0;
-    return detector[idx]=oldValue + sum*traveledLength*geo.dVoxelX;
+    detector[idx]=oldValue + sum*traveledLength*geo.dVoxelX;
 }
 
 

@@ -43,7 +43,7 @@
  * ---------------------------------------------------------------------------
  */
 
-#define  PI_2 1.57079632679489661923
+#define  PI_4 0.78539816
 #include <algorithm>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
@@ -131,11 +131,6 @@ __device__ Point3D getNewDirections(Point3D Q, Point3D ray, float nIncidence, fl
     v1.y = ray.y / rayLength;
     v1.z = ray.z / rayLength;
 
-    // Q = (i, j, k) refraction Qoint
-    Q.x = i;
-    Q.y = j;
-    Q.z = k;
-
     // n = (Q - C) / ||Q - C|| normal vector to tube surface, C = (0, 0, Q.z) tube center
     float nLength = __fsqrt_rd(Q.x*Q.x + Q.y*Q.y);
     n.x = Q.x / nLength;
@@ -146,7 +141,7 @@ __device__ Point3D getNewDirections(Point3D Q, Point3D ray, float nIncidence, fl
     if (incidenceAngle == 0) return v1;
 
     float refractionAngle = asinf(nIncidence * sinf(incidenceAngle) / nRefraction);
-    if (refractionAngle > PI/2) {
+    if (refractionAngle > PI_4) {
         rayGotPrisioned = true;
         return;
     }
@@ -280,9 +275,10 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
         
         float auxCOR=COR/geo.dDetecU;
         // Now iterate through Z in our voxel column FOR A GIVEN PROJECTION
-#pragma unroll
+        float h = geo.dDetecU * (DSD - DSO) / (EPS - geo.dDetecU);
         int lastGoodY = 0;
-
+        int lastGoodZ = 0;
+#pragma unroll
         for(colIdx=0; colIdx<VOXELS_PER_THREAD; colIdx++)
         {
             unsigned long long indZ = startIndZ + colIdx;
@@ -303,10 +299,10 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
             Point3D Q, v2;
 
             if (lastGoodY > 0) {
-                for (int v = 0; v < geo.nDetecV; v++){
+                for (int v = lastGoodZ-5; v < lastGoodZ+6; v++){
                     if (hasFoundBestPixel) break;
 
-                    for (int u = lastGoodY-5; u < lastGoodY+5; u++){
+                    for (int u = lastGoodY-5; u < lastGoodY+6; u++){
                         // source position scaled
                         Point3D Suv;
                         Suv.x = S.x;
@@ -355,6 +351,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
                         if (rayGotPrisioned) {
                             rayGotPrisioned = false;
+                            lastGoodY = 0;
+                            lastGoodZ = 0;
                             continue;
                         }
 
@@ -369,6 +367,7 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
                         if (distanceFromPtoU < geo.dVoxelX) {
                             lastGoodY = u;
+                            lastGoodZ = v;
                             hasFoundBestPixel = true;
                             break;
                         }
@@ -376,10 +375,13 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
                 }
             }
 
+            int initialU = floorf((geo.nDetecU - 1)/2 - gelTubeRadius * geo.dDetecU / EPS);
+            int lastU = ceilf((geo.nDetecU - 1) / 2 + gelTubeRadius * geo.dDetecU / EPS);
+
             for (int v = 0; v < geo.nDetecV; v++){
                 if (hasFoundBestPixel) break;
 
-                for (int u = 0; u < geo.nDetecU; u++){
+                for (int u = initialU; u < lastU; u++){
                     // source position scaled
                     Point3D Suv;
                     Suv.x = S.x;
@@ -428,6 +430,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
                     if (rayGotPrisioned) {
                         rayGotPrisioned = false;
+                        lastGoodY = 0;
+                        lastGoodZ = 0;
                         continue;
                     }
 
@@ -442,6 +446,7 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
                     if (distanceFromPtoU < geo.dVoxelX) {
                         lastGoodY = u;
+                        lastGoodZ = v;
                         hasFoundBestPixel = true;
                         break;
                     }
@@ -449,6 +454,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
             }
 
             if (!hasFoundBestPixel) {
+                lastGoodY = 0;
+                lastGoodZ = 0;
                 continue;
             }
 
