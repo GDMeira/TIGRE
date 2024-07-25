@@ -334,24 +334,18 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
                         ray.y = ray.y / rayLength;
                         ray.z = ray.z / rayLength;
 
-                        float aux1 = -2 * Suv.x * ray.x - 2 * Suv.y * ray.y - 2 * Suv.z * ray.z;
+                        float aux1 = -2 * Suv.x * ray.x - 2 * Suv.y * ray.y;
                         aux1 = aux1*aux1;
-                        float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
-                        float aux3 = (gelTubeRadius * gelTubeRadius - Suv.x * Suv.x - Suv.y * Suv.y - Suv.z * Suv.z);
-                        float aux4 = 2 * Suv.x * ray.x + 2 * Suv.y * ray.y + 2 * Suv.z * ray.z;
-                        float aux5 = 2 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
+                        float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y);
+                        float aux3 = (gelTubeRadius * gelTubeRadius - Suv.x * Suv.x - Suv.y * Suv.y);
+                        float aux4 = 2 * Suv.x * ray.x + 2 * Suv.y * ray.y;
+                        float aux5 = 2 * (ray.x * ray.x + ray.y * ray.y);
 
-                        float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
-                        float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
-                        float a;
+                        float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+                        float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+                        float a = a1 > 0 ? a1 : a2;
 
-                        if (a1 > 0 && (a2 < 0 || a2 > a1)) {
-                            a = a1;
-                        } else {
-                            a = a2;
-                        }
-
-                        // point where ray intersects the gel tube
+                        // point where ray intersects the gel tube 1 time
                         Q.x = Suv.x + a * ray.x;
                         Q.y = Suv.y + a * ray.y;
                         Q.z = Suv.z + a * ray.z;
@@ -413,24 +407,18 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
                     ray.y = ray.y / rayLength;
                     ray.z = ray.z / rayLength;
 
-                    float aux1 = -2 * Suv.x * ray.x - 2 * Suv.y * ray.y - 2 * Suv.z * ray.z;
+                    float aux1 = -2 * Suv.x * ray.x - 2 * Suv.y * ray.y;
                     aux1 = aux1*aux1;
-                    float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
-                    float aux3 = (gelTubeRadius * gelTubeRadius - Suv.x * Suv.x - Suv.y * Suv.y - Suv.z * Suv.z);
-                    float aux4 = 2 * Suv.x * ray.x + 2 * Suv.y * ray.y + 2 * Suv.z * ray.z;
-                    float aux5 = 2 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
+                    float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y);
+                    float aux3 = (gelTubeRadius * gelTubeRadius - Suv.x * Suv.x - Suv.y * Suv.y);
+                    float aux4 = 2 * Suv.x * ray.x + 2 * Suv.y * ray.y;
+                    float aux5 = 2 * (ray.x * ray.x + ray.y * ray.y);
 
-                    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
-                    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
-                    float a;
+                    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+                    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+                    float a = a1 > 0 ? a1 : a2;
 
-                    if (a1 > 0 && (a2 < 0 || a2 > a1)) {
-                        a = a1;
-                    } else {
-                        a = a2;
-                    }
-
-                    // point where ray intersects the gel tube
+                    // point where ray intersects the gel tube 1 time
                     Q.x = Suv.x + a * ray.x;
                     Q.y = Suv.y + a * ray.y;
                     Q.z = Suv.z + a * ray.z;
@@ -464,16 +452,15 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
                 continue;
             }
 
-            float aux1 = -2 * Q.x * v2.x - 2 * Q.y * v2.y - 2 * Q.z * v2.z;
+            float aux1 = -2 * Q.x * v2.x - 2 * Q.y * v2.y;
             aux1 = aux1*aux1;
-            float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y - v2.z * v2.z);
-            float aux3 = (gelTubeRadius * gelTubeRadius - Q.x * Q.x - Q.y * Q.y - Q.z * Q.z);
-            float aux4 = 2 * Q.x * v2.x + 2 * Q.y * v2.y + 2 * Q.z * v2.z;
-            float aux5 = 2 * (-v2.x * v2.x - v2.y * v2.y - v2.z * v2.z);
+            float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y);
+            float aux3 = (gelTubeRadius * gelTubeRadius - Q.x * Q.x - Q.y * Q.y);
+            float aux4 = 2 * Q.x * v2.x + 2 * Q.y * v2.y;
+            float aux5 = 2 * (v2.x * v2.x + v2.y * v2.y);
 
-            // 2 solutions for points where ray intersects the gel tube
-            float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
-            float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+            float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+            float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
             float a = fabsf(a1) > fabsf(a2) ? a1 : a2;
 
             // next point where ray intersects the gel tube, getting out of the tube

@@ -182,15 +182,15 @@ __device__ void setNewDirections(
     aux.y = P.y - C.y;
     aux.z = 0;
 
-    float aux1 = -2 * aux.x * v2.x - 2 * aux.y * v2.y - 2 * aux.z * v2.z;
+    float aux1 = -2 * aux.x * v2.x - 2 * aux.y * v2.y;
     aux1 = aux1*aux1;
-    float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y - v2.z * v2.z);
-    float aux3 = (gelTubeRadius * gelTubeRadius - aux.x * aux.x - aux.y * aux.y - aux.z * aux.z);
-    float aux4 = 2 * aux.x * v2.x + 2 * aux.y * v2.y + 2 * aux.z * v2.z;
-    float aux5 = 2 * (-v2.x * v2.x - v2.y * v2.y - v2.z * v2.z);
+    float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y);
+    float aux3 = (gelTubeRadius * gelTubeRadius - aux.x * aux.x - aux.y * aux.y);
+    float aux4 = 2 * aux.x * v2.x + 2 * aux.y * v2.y;
+    float aux5 = 2 * (v2.x * v2.x + v2.y * v2.y);
 
-    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
-    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
     float t;
 
     if (fabsf(a1) > fabsf(a2)) {
@@ -320,7 +320,7 @@ __global__ void kernelPixelDetector( Geometry geo,
 
     // changing source for each u, v
     // o (0,0,0) est� no canto da imagem, uvorigem � o canto do detector nessa geometria
-    // TODO: add some auxiliar to get gel tube diameter
+
     float gelTubeRadius = aux2.x/geo.dVoxelX; //aux2.x;
     float nWater = aux2.y; //aux2.y;
     float nGel = aux2.z; //aux2.z;
@@ -367,15 +367,20 @@ __global__ void kernelPixelDetector( Geometry geo,
         return;
     }
 
-    float aux1 = -2 * newSource.x * ray.x - 2 * newSource.y * ray.y - 2 * newSource.z * ray.z;
-    aux1 = aux1*aux1;
-    float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
-    float aux3 = (gelTubeRadius * gelTubeRadius - newSource.x * newSource.x - newSource.y * newSource.y - newSource.z * newSource.z);
-    float aux4 = 2 * newSource.x * ray.x + 2 * newSource.y * ray.y + 2 * newSource.z * ray.z;
-    float aux5 = 2 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
+    Point3D Q;
+    Q.x = newSource.x - geo.nVoxelX/2;
+    Q.y = newSource.y - geo.nVoxelY/2;
+    Q.z = 0;
 
-    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
-    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+    float aux1 = -2 * Q.x * v2.x - 2 * Q.y * v2.y;
+    aux1 = aux1*aux1;
+    float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y);
+    float aux3 = (gelTubeRadius * gelTubeRadius - Q.x * Q.x - Q.y * Q.y);
+    float aux4 = 2 * Q.x * v2.x + 2 * Q.y * v2.y;
+    float aux5 = 2 * (v2.x * v2.x + v2.y * v2.y);
+
+    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
 
     // points where ray intersects the gel tube
     Point3D Q1, Q2;
