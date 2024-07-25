@@ -177,45 +177,62 @@ __device__ void setNewDirections(
         return;
     }
 
-    // next point after refraction
-    P.x = iNext;
-    P.y = jNext;
-    P.z = kNext;
+    Point3D aux;
+    aux.x = P.x - C.x;
+    aux.y = P.y - C.y;
+    aux.z = 0;
+
+    float aux1 = -2 * aux.x * v2.x - 2 * aux.y * v2.y - 2 * aux.z * v2.z;
+    aux1 = aux1*aux1;
+    float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y - v2.z * v2.z);
+    float aux3 = (gelTubeRadius * gelTubeRadius - aux.x * aux.x - aux.y * aux.y - aux.z * aux.z);
+    float aux4 = 2 * aux.x * v2.x + 2 * aux.y * v2.y + 2 * aux.z * v2.z;
+    float aux5 = 2 * (-v2.x * v2.x - v2.y * v2.y - v2.z * v2.z);
+
+    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+    float t;
+
+    if (fabsf(a1) > fabsf(a2)) {
+        t = a1;
+    } else {
+        t = a2;
+    }
+
+    // // make a for loop to find the intersection point with the tube
+    // float t = 1;
+    // float tStep = 0.1;
+    // float tubeRadiusSquare = tubeRadius * tubeRadius;
+
+    float x = P.x + t * v2.x;
+    float y = P.y + t * v2.y;
+
+    // if (x*x + y*y > tubeRadiusSquare) {
+    //     tStep = -0.01;
+
+    //     while (t > 2*fabsf(tStep)) {
+    //         float distanceToTubeCenterSquare = (x - C.x)*(x - C.x) + (y - C.y)*(y - C.y);
+    //         if (distanceToTubeCenterSquare < tubeRadiusSquare) {
+    //             break;
+    //         }
+
+    //         t += tStep;
+    //     }
+    // } else {
+    //     while (t < tubeRadius) {
+    //         float distanceToTubeCenterSquare = (x - C.x)*(x - C.x) + (y - C.y)*(y - C.y);
+    //         if (distanceToTubeCenterSquare > tubeRadiusSquare) {
+    //             break;
+    //         }
+
+    //         t += tStep;
+    //     }
+    // }
 
     // update curent point
     i = iNext;
     j = jNext;
     k = kNext;
-
-    // make a for loop to find the intersection point with the tube
-    float t = 1;
-    float tStep = 0.1;
-    float tubeRadiusSquare = tubeRadius * tubeRadius;
-    
-    float x = P.x + t * v2.x;
-    float y = P.y + t * v2.y;
-
-    if (x*x + y*y > tubeRadiusSquare) {
-        tStep = -0.01;
-
-        while (t > 2*fabsf(tStep)) {
-            float distanceToTubeCenterSquare = (x - C.x)*(x - C.x) + (y - C.y)*(y - C.y);
-            if (distanceToTubeCenterSquare < tubeRadiusSquare) {
-                break;
-            }
-
-            t += tStep;
-        }
-    } else {
-        while (t < tubeRadius) {
-            float distanceToTubeCenterSquare = (x - C.x)*(x - C.x) + (y - C.y)*(y - C.y);
-            if (distanceToTubeCenterSquare > tubeRadiusSquare) {
-                break;
-            }
-
-            t += tStep;
-        }
-    }
 
     // v2*t is the distance from P to the next refraction point
     v2.x = v2.x * t;
@@ -225,7 +242,7 @@ __device__ void setNewDirections(
     if (nIncidence < nRefraction) {
         traveledLength = t;
     }
-    
+
     float eps=0.001;
     v2.x=(fabsf(v2.x)<eps)? 0 : v2.x;
     v2.y=(fabsf(v2.y)<eps)? 0 : v2.y;

@@ -118,9 +118,68 @@ __constant__ Point3D projParamsArrayDev[6*PROJ_PER_KERNEL];  // Dev means it is 
 // Point3D projParamsArrayHost[6*PROJ_PER_KERNEL];   // Host means it is host memory
 
 // Now we also need to store sinAlpha and cosAlpha for each projection (two floats per projection)
-__constant__ float projSinCosArrayDev[6*PROJ_PER_KERNEL];
+__constant__ float projSinCosArrayDev[9*PROJ_PER_KERNEL];
 
 
+__device__ Point3D getNewDirections(Point3D Q, Point3D ray, float nIncidence, float nRefraction, bool& rayGotPrisioned) {
+    // new direction after refraction
+    Point3D v1, n, N, v2;
+
+    // incident ray versor
+    float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
+    v1.x = ray.x / rayLength;
+    v1.y = ray.y / rayLength;
+    v1.z = ray.z / rayLength;
+
+    // Q = (i, j, k) refraction Qoint
+    Q.x = i;
+    Q.y = j;
+    Q.z = k;
+
+    // n = (Q - C) / ||Q - C|| normal vector to tube surface, C = (0, 0, Q.z) tube center
+    float nLength = __fsqrt_rd(Q.x*Q.x + Q.y*Q.y);
+    n.x = Q.x / nLength;
+    n.y = Q.y / nLength;
+    n.z = 0;
+
+    float incidenceAngle = acosf(v1.x*n.x + v1.y*n.y + v1.z*n.z);
+    if (incidenceAngle == 0) return v1;
+
+    float refractionAngle = asinf(nIncidence * sinf(incidenceAngle) / nRefraction);
+    if (refractionAngle > PI/2) {
+        rayGotPrisioned = true;
+        return;
+    }
+
+    // N = n x v1 normal to the plane formed by n and v1 and v2
+    N.x = -n.y * v1.z;
+    N.y = n.x * v1.z;
+    N.z = v1.x * n.y - v1.y * n.x;
+
+    // v2 is the refracted ray
+    if (v1.z == 0) {
+        v2.z = 0; // v2 has to be in same plane as v1
+        v2.y = 1; // initial guess. We know it will be the same sign as v1.y
+        v2.x = __fdividef(-cosf(refractionAngle) - n.y, n.x);
+        // check if initial guess is correct
+        if (v2.x * v1.x + v2.y * v1.y < 0) {
+            v2.y = -1;
+            v2.x = __fdividef(-cosf(refractionAngle) + n.y, n.x);
+        }
+    } else {
+        v2.z = v1.z; // initial guess. We know it will be the same sign as v1.z
+        v2.y = (-N.x * cosf(refractionAngle) + v2.z * (n.x*N.z - n.z*N.x)) / (N.x*n.y - n.x*N.y);
+        v2.x = (-v2.y * N.y - N.z * v2.z) / N.x;
+    }
+
+    // normalize v2
+    float v2Length = __fsqrt_rd(v2.x*v2.x + v2.y*v2.y + v2.z*v2.z);
+    v2.x = v2.x / v2Length;
+    v2.y = v2.y / v2Length;
+    v2.z = v2.z / v2Length;
+
+    return v2;
+}
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 // END RB, 10/31/2016: Add constant memory arrays to store parameters for all projections to be analyzed during a single kernel call
@@ -156,11 +215,15 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
     unsigned long long indY = blockIdx.y * blockDim.y + threadIdx.y;
     unsigned long long indX = blockIdx.x * blockDim.x + threadIdx.x;
 
-    float gelTubeRadius = projSinCosArrayDev[9 * projNumber + 6];
-    float distanceToTubeCenterSquare = (indY + 0.5f - geo.nVoxelY)*geo.dVoxelY*(indY + 0.5f - geo.nVoxelY)*geo.dVoxelY+(indX + 0.5f - geo.nVoxelX)*geo.dVoxelX*(indX + 0.5f - geo.nVoxelX)*geo.dVoxelX;
+    float gelTubeRadius = projSinCosArrayDev[0];
+    float distanceToTubeCenterSquare = (indY + 0.5f - geo.nVoxelY*0.5f)*geo.dVoxelY*(indY + 0.5f - geo.nVoxelY*0.5f)*geo.dVoxelY+(indX + 0.5f - geo.nVoxelX*0.5f)*geo.dVoxelX*(indX + 0.5f - geo.nVoxelX*0.5f)*geo.dVoxelX;
 
+    // this colum of voxels is outside the gel tube?
     if ( distanceToTubeCenterSquare > gelTubeRadius * gelTubeRadius)
         return;
+
+    gelTubeRadius = gelTubeRadius/geo.dDetecU; //scaling to detector units
+
     // unsigned long startIndZ = blockIdx.z * blockDim.z + threadIdx.z;  // This is only STARTING z index of the column of voxels that the thread will handle
     unsigned long long startIndZ = blockIdx.z * VOXELS_PER_THREAD + threadIdx.z;  // This is only STARTING z index of the column of voxels that the thread will handle
     //Make sure we don't go out of bounds
@@ -218,6 +281,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
         float auxCOR=COR/geo.dDetecU;
         // Now iterate through Z in our voxel column FOR A GIVEN PROJECTION
 #pragma unroll
+        int lastGoodY = 0;
+
         for(colIdx=0; colIdx<VOXELS_PER_THREAD; colIdx++)
         {
             unsigned long long indZ = startIndZ + colIdx;
@@ -226,40 +291,217 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
             // be trying to copy the out of bounds values anyway (bounds checks will be done in the final loop where the values go to the main volume)
             if(indZ>=geo.nVoxelZ)
                 break;   // break the loop.
-            
+
             // "XYZ" in the scaled coordinate system of the current point. The image is rotated with the projection angles.
             Point3D P;
             P.x=(xyzOrigin.x+indX*deltaX.x+indY*deltaY.x+indZ*deltaZ.x);
             P.y=(xyzOrigin.y+indX*deltaX.y+indY*deltaY.y+indZ*deltaZ.y)-auxCOR;
             P.z=(xyzOrigin.z+indX*deltaX.z+indY*deltaY.z+indZ*deltaZ.z);
 
-            // a origem está no centro da imagem, sobre o eixo de rotação
-            // Point3D detector;
-            // detector.x = -DSD + DSO; //x axis point to source
-            // detector.y = S.y;
-            // detector.z = S.z;
+            bool rayGotPrisioned = false;
+            bool hasFoundBestPixel = false;
+            Point3D Q, v2;
 
-            float h = geo.dDetecU * (DSD - DSO)/(EPS - geo.dDetecU);
+            if (lastGoodY > 0) {
+                for (int v = 0; v < geo.nDetecV; v++){
+                    if (hasFoundBestPixel) break;
 
-            Point3D H; 
-            H.x = -DSD + DSO - h;
-            H.y = S.y;
-            H.z = S.z;
+                    for (int u = lastGoodY-5; u < lastGoodY+5; u++){
+                        // source position scaled
+                        Point3D Suv;
+                        Suv.x = S.x;
+                        Suv.y = S.y + (u - (float)(geo.nDetecU - 1) * 0.5f) * EPS * __fdividef( DSD + h, (DSD - DSO + h)*geo.dDetecU );
+                        Suv.z = S.z + (v - (float)(geo.nDetecV - 1) * 0.5f) * EPS * __fdividef( DSD + h, (DSD - DSO + h)*geo.dDetecV );
 
-            // This is the vector defining the line from the H to the Voxel
-            float vectX,vectY,vectZ;
-            vectX=(P.x -H.x);
-            vectY=(P.y -H.y);
-            vectZ=(P.z -H.z);
-            
-            // Get the coordinates in the detector UV where the mid point of the voxel is projected.
-            float t=__fdividef(h, vectX);
-            float y,z;
-            y=vectY*t+H.y;
-            z=vectZ*t+H.z;
+                        // detector position scaled
+                        Point3D detector;
+                        detector.x = -DSD + DSO; //x axis point to source
+                        detector.y = S.y + u - (float)(geo.nDetecU - 1) * 0.5f;
+                        detector.z = S.z + v - (float)(geo.nDetecV - 1) * 0.5f;
+
+                        // vector from source to detector
+                        Point3D ray;
+                        ray.x = detector.x - Suv.x;
+                        ray.y = detector.y - Suv.y;
+                        ray.z = detector.z - Suv.z;
+
+                        if (ray.y*0.5f + Suv.y < geo.nVoxelY/(2*geo.dDetecU) - gelTubeRadius || ray.y*0.5f + Suv.y > geo.nVoxelY/(2*geo.dDetecU) + gelTubeRadius) {
+                            continue;
+                        }
+
+                        float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
+                        ray.x = ray.x / rayLength;
+                        ray.y = ray.y / rayLength;
+                        ray.z = ray.z / rayLength;
+
+                        float aux1 = -2 * Suv.x * ray.x - 2 * Suv.y * ray.y - 2 * Suv.z * ray.z;
+                        aux1 = aux1*aux1;
+                        float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
+                        float aux3 = (gelTubeRadius * gelTubeRadius - Suv.x * Suv.x - Suv.y * Suv.y - Suv.z * Suv.z);
+                        float aux4 = 2 * Suv.x * ray.x + 2 * Suv.y * ray.y + 2 * Suv.z * ray.z;
+                        float aux5 = 2 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
+
+                        float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+                        float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+                        float a;
+
+                        if (a1 > 0 && (a2 < 0 || a2 > a1)) {
+                            a = a1;
+                        } else {
+                            a = a2;
+                        }
+
+                        // point where ray intersects the gel tube
+                        Q.x = Suv.x + a * ray.x;
+                        Q.y = Suv.y + a * ray.y;
+                        Q.z = Suv.z + a * ray.z;
+
+                        // unit vector of the ray after refraction
+                        v2 = getNewDirections(Q, ray, nWater, nGel, rayGotPrisioned);
+
+                        if (rayGotPrisioned) {
+                            rayGotPrisioned = false;
+                            continue;
+                        }
+
+                        float t = Q.x - P.x;
+
+                        // point in the yz plan that contains P
+                        Point3D U;
+                        U.y = P.y + t * v2.y;
+                        U.z = P.z + t * v2.z;
+
+                        float distanceFromPtoU = __fsqrt_rd((P.y - U.y) * (P.y - U.y) + (P.z - U.z) * (P.z - U.z))/geo.dDetecU;
+
+                        if (distanceFromPtoU < geo.dVoxelX) {
+                            lastGoodY = u;
+                            hasFoundBestPixel = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            for (int v = 0; v < geo.nDetecV; v++){
+                if (hasFoundBestPixel) break;
+
+                for (int u = 0; u < geo.nDetecU; u++){
+                    // source position scaled
+                    Point3D Suv;
+                    Suv.x = S.x;
+                    Suv.y = S.y + (u - (float)(geo.nDetecU - 1) * 0.5f) * EPS * __fdividef( DSD + h, (DSD - DSO + h)*geo.dDetecU );
+                    Suv.z = S.z + (v - (float)(geo.nDetecV - 1) * 0.5f) * EPS * __fdividef( DSD + h, (DSD - DSO + h)*geo.dDetecV );
+
+                    // detector position scaled
+                    Point3D detector;
+                    detector.x = -DSD + DSO; //x axis point to source
+                    detector.y = S.y + u - (float)(geo.nDetecU - 1) * 0.5f;
+                    detector.z = S.z + v - (float)(geo.nDetecV - 1) * 0.5f;
+
+                    // vector from source to detector
+                    Point3D ray;
+                    ray.x = detector.x - Suv.x;
+                    ray.y = detector.y - Suv.y;
+                    ray.z = detector.z - Suv.z;
+
+                    if (ray.y*0.5f + Suv.y < geo.nVoxelY/(2*geo.dDetecU) - gelTubeRadius || ray.y*0.5f + Suv.y > geo.nVoxelY/(2*geo.dDetecU) + gelTubeRadius) {
+                        continue;
+                    }
+
+                    float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
+                    ray.x = ray.x / rayLength;
+                    ray.y = ray.y / rayLength;
+                    ray.z = ray.z / rayLength;
+
+                    float aux1 = -2 * Suv.x * ray.x - 2 * Suv.y * ray.y - 2 * Suv.z * ray.z;
+                    aux1 = aux1*aux1;
+                    float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
+                    float aux3 = (gelTubeRadius * gelTubeRadius - Suv.x * Suv.x - Suv.y * Suv.y - Suv.z * Suv.z);
+                    float aux4 = 2 * Suv.x * ray.x + 2 * Suv.y * ray.y + 2 * Suv.z * ray.z;
+                    float aux5 = 2 * (-ray.x * ray.x - ray.y * ray.y - ray.z * ray.z);
+
+                    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+                    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+                    float a;
+
+                    if (a1 > 0 && (a2 < 0 || a2 > a1)) {
+                        a = a1;
+                    } else {
+                        a = a2;
+                    }
+
+                    // point where ray intersects the gel tube
+                    Q.x = Suv.x + a * ray.x;
+                    Q.y = Suv.y + a * ray.y;
+                    Q.z = Suv.z + a * ray.z;
+
+                    // unit vector of the ray after refraction
+                    v2 = getNewDirections(Q, ray, nWater, nGel, rayGotPrisioned);
+
+                    if (rayGotPrisioned) {
+                        rayGotPrisioned = false;
+                        continue;
+                    }
+
+                    float t = Q.x - P.x;
+
+                    // point in the yz plan that contains P
+                    Point3D U;
+                    U.y = P.y + t * v2.y;
+                    U.z = P.z + t * v2.z;
+
+                    float distanceFromPtoU = __fsqrt_rd((P.y - U.y) * (P.y - U.y) + (P.z - U.z) * (P.z - U.z))/geo.dDetecU;
+
+                    if (distanceFromPtoU < geo.dVoxelX) {
+                        lastGoodY = u;
+                        hasFoundBestPixel = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!hasFoundBestPixel) {
+                continue;
+            }
+
+            float aux1 = -2 * Q.x * v2.x - 2 * Q.y * v2.y - 2 * Q.z * v2.z;
+            aux1 = aux1*aux1;
+            float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y - v2.z * v2.z);
+            float aux3 = (gelTubeRadius * gelTubeRadius - Q.x * Q.x - Q.y * Q.y - Q.z * Q.z);
+            float aux4 = 2 * Q.x * v2.x + 2 * Q.y * v2.y + 2 * Q.z * v2.z;
+            float aux5 = 2 * (-v2.x * v2.x - v2.y * v2.y - v2.z * v2.z);
+
+            // 2 solutions for points where ray intersects the gel tube
+            float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+            float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) + aux4) / aux5;
+            float a = fabsf(a1) > fabsf(a2) ? a1 : a2;
+
+            // next point where ray intersects the gel tube, getting out of the tube
+            Q.x = Q.x + a * v2.x;
+            Q.y = Q.y + a * v2.y;
+            Q.z = Q.z + a * v2.z;
+
+            // unit vector of the ray after refraction
+            v2 = getNewDirections(Q, v2, nGel, nWater, rayGotPrisioned);
+
+            if (rayGotPrisioned) {
+                rayGotPrisioned = false;
+                continue;
+            }
+
+            // point in the detector plan where the ray intersects
+            Point3D Duv;
+            Duv.x = -DSD + DSO; //x axis point to source
+            float t = Duv.x - Q.x;
+            Duv.y = Q.y + t * v2.y;
+            Duv.z = Q.z + t * v2.z;
+
             float u,v;
-            u=y+(float)geo.nDetecU*0.5f;
-            v=z+(float)geo.nDetecV*0.5f;
+            u=Duv.y+(float)geo.nDetecU*0.5f;
+            v=Duv.z+(float)geo.nDetecV*0.5f;
+
+            if (u<0 || u>=geo.nDetecU || v<0 || v>=geo.nDetecV)
+                continue;
 
             Point3D SUV; //in real geometry (no scale)
             SUV.x = S.x;
@@ -268,8 +510,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
             
             float weight;
             float realx, realy, realDSO;
-            realx=-(geo.sVoxelX-geo.dVoxelX)*0.5f  +(indX + 0.5f)*geo.dVoxelX   +xyzOffset.x;
-            realy=-(geo.sVoxelY-geo.dVoxelY)*0.5f  +(indY + 0.5f)*geo.dVoxelY   +xyzOffset.y+COR;
+            realx=-(geo.sVoxelX-geo.dVoxelX)*0.5f + indX*geo.dVoxelX + xyzOffset.x;
+            realy=-(geo.sVoxelY-geo.dVoxelY)*0.5f + indY*geo.dVoxelY + xyzOffset.y+COR;
             realDSO= __fsqrt_rd(DSO * DSO + SUV.y * SUV.y);
             
             weight=__fdividef(realDSO+realy*sinalpha-realx*cosalpha,realDSO);
@@ -400,7 +642,7 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
     Point3D* projParamsArrayHost;
     cudaMallocHost((void**)&projParamsArrayHost,6*PROJ_PER_KERNEL*sizeof(Point3D));
     float* projSinCosArrayHost;
-    cudaMallocHost((void**)&projSinCosArrayHost,6*PROJ_PER_KERNEL*sizeof(float));
+    cudaMallocHost((void**)&projSinCosArrayHost,9*PROJ_PER_KERNEL*sizeof(float));
     
     
     // Texture object variables
@@ -544,12 +786,15 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                             sinalpha=sin(geoArray[img_slice*deviceCount+dev].alpha);
                             cosalpha=cos(geoArray[img_slice*deviceCount+dev].alpha);
                             
-                            projSinCosArrayHost[6*j]=sinalpha;  // 2*j because we have 2 float (sin or cos angle) values per projection
-                            projSinCosArrayHost[6*j+1]=cosalpha;
-                            projSinCosArrayHost[6*j+2]=geo.COR[currProjNumber_global];
-                            projSinCosArrayHost[6*j+3]=geo.DSD[currProjNumber_global];
-                            projSinCosArrayHost[6*j+4]=geo.DSO[currProjNumber_global];
-                            projSinCosArrayHost[6 * j + 5] = geo.EPS;
+                            projSinCosArrayHost[9*j]=sinalpha;  // 2*j because we have 2 float (sin or cos angle) values per projection
+                            projSinCosArrayHost[9*j+1]=cosalpha;
+                            projSinCosArrayHost[9*j+2]=geo.COR[currProjNumber_global];
+                            projSinCosArrayHost[9*j+3]=geo.DSD[currProjNumber_global];
+                            projSinCosArrayHost[9*j+4]=geo.DSO[currProjNumber_global];
+                            projSinCosArrayHost[9*j+5] = geo.EPS;
+                            projSinCosArrayHost[9*j+6] = geo.gelTubeRadius;
+                            projSinCosArrayHost[9*j+7] = geo.nWater;
+                            projSinCosArrayHost[9*j+8] = geo.nGel;
                             
                             computeDeltasCube(geoArray[img_slice*deviceCount+dev],currProjNumber_global,&xyzOrigin,&deltaX,&deltaY,&deltaZ,&source);
                             
@@ -566,7 +811,7 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                         }   // END for (preparing params for kernel call)
                         
                         // Copy the prepared parameter arrays to constant memory to make it available for the kernel
-                        cudaMemcpyToSymbolAsync(projSinCosArrayDev, projSinCosArrayHost, sizeof(float)*6*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
+                        cudaMemcpyToSymbolAsync(projSinCosArrayDev, projSinCosArrayHost, sizeof(float)*9*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
                         cudaMemcpyToSymbolAsync(projParamsArrayDev, projParamsArrayHost, sizeof(Point3D)*6*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
                         cudaStreamSynchronize(stream[dev*nStreamDevice]);
                         
