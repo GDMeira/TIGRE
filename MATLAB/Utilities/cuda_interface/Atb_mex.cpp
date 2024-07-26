@@ -354,4 +354,5 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, mxArray const* prhs[]) {
     free(geo.dRoll);
     free(geo.dPitch);
     free(geo.dYaw);
+    free(result);
 }

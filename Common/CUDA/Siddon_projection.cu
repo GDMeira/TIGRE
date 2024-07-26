@@ -108,7 +108,7 @@ __global__ void vecAddInPlace(float *a, float *b, unsigned long  n)
 }
 
 __device__ void setNewDirections(
-    Point3D& ray, Geometry geo, unsigned long i, unsigned long j, unsigned long k, float& iu, float& ju, float& ku, float iNext, float jNext, float kNext,
+    Point3D& ray, Geometry geo,  unsigned long& i, unsigned long& j, unsigned long& k, float& iu, float& ju, float& ku, float iNext, float jNext, float kNext,
     float& axu, float& ayu, float& azu, float& ax, float& ay, float& az, float& ac, bool& rayGotPrisioned, float nIncidence, float nRefraction, float tubeRadius,
     float& aminc, float& traveledLength
 ){
@@ -177,57 +177,30 @@ __device__ void setNewDirections(
         return;
     }
 
-    Point3D aux;
-    aux.x = P.x - C.x;
-    aux.y = P.y - C.y;
-    aux.z = 0;
-
-    float aux1 = -2 * aux.x * v2.x - 2 * aux.y * v2.y;
-    aux1 = aux1*aux1;
-    float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y);
-    float aux3 = (tubeRadius * tubeRadius - aux.x * aux.x - aux.y * aux.y);
-    float aux4 = 2 * aux.x * v2.x + 2 * aux.y * v2.y;
-    float aux5 = 2 * (v2.x * v2.x + v2.y * v2.y);
-
-    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
-    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
     float t;
 
-    if (fabsf(a1) > fabsf(a2)) {
-        t = a1;
-    } else {
-        t = a2;
+    if (true) {
+        Point3D aux;
+        aux.x = P.x - C.x;
+        aux.y = P.y - C.y;
+        aux.z = 0;
+
+        float aux1 = -2 * aux.x * v2.x - 2 * aux.y * v2.y;
+        aux1 = aux1*aux1;
+        float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y);
+        float aux3 = (tubeRadius * tubeRadius - aux.x * aux.x - aux.y * aux.y);
+        float aux4 = 2 * aux.x * v2.x + 2 * aux.y * v2.y;
+        float aux5 = 2 * (v2.x * v2.x + v2.y * v2.y);
+
+        float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+        float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+
+        if (fabsf(a1) > fabsf(a2)) {
+            t = a1;
+        } else {
+            t = a2;
+        }
     }
-
-    // // make a for loop to find the intersection point with the tube
-    // float t = 1;
-    // float tStep = 0.1;
-    // float tubeRadiusSquare = tubeRadius * tubeRadius;
-
-    float x = P.x + t * v2.x;
-    float y = P.y + t * v2.y;
-
-    // if (x*x + y*y > tubeRadiusSquare) {
-    //     tStep = -0.01;
-
-    //     while (t > 2*fabsf(tStep)) {
-    //         float distanceToTubeCenterSquare = (x - C.x)*(x - C.x) + (y - C.y)*(y - C.y);
-    //         if (distanceToTubeCenterSquare < tubeRadiusSquare) {
-    //             break;
-    //         }
-
-    //         t += tStep;
-    //     }
-    // } else {
-    //     while (t < tubeRadius) {
-    //         float distanceToTubeCenterSquare = (x - C.x)*(x - C.x) + (y - C.y)*(y - C.y);
-    //         if (distanceToTubeCenterSquare > tubeRadiusSquare) {
-    //             break;
-    //         }
-
-    //         t += tStep;
-    //     }
-    // }
 
     // update curent point
     i = iNext;
@@ -254,9 +227,9 @@ __device__ void setNewDirections(
     ac=0.0f;
 
     // get intersection point N1. eq(20-21) [(also eq 9-10)]
-    ax=__frcp_rd(ray.x);
-    ay=__frcp_rd(ray.y);
-    az=__frcp_rd(ray.z);
+    ax = __frcp_rd(fabsf(ray.x));
+    ay = __frcp_rd(fabsf(ray.y));
+    az = __frcp_rd(fabsf(ray.z));
     
     // If its Infinite (i.e. ray is perpendicular to axis), make sure its positive
     ax=(isinf(ax))? abs(ax) : ax;
@@ -268,9 +241,9 @@ __device__ void setNewDirections(
     aminc=fminf(fminf(ax,ay),az);
 
     //eq (28), unit anlges
-    axu=ax;
-    ayu=ay;
-    azu=az;
+    axu = ax;
+    ayu = ay;
+    azu = az;
     // eq(29), direction of update
     iu=(v2.x > 0)? 1.0f : -1.0f;
     ju=(v2.y > 0)? 1.0f : -1.0f;
@@ -312,14 +285,14 @@ __global__ void kernelPixelDetector( Geometry geo,
 
     /////// Get coordinates XYZ of pixel UV
     unsigned long pixelV = geo.nDetecV-v-1;
-    unsigned long pixelU = u; 
+    unsigned long pixelU = u;
     Point3D pixel1D;
     pixel1D.x=(uvOrigin.x+pixelU*deltaU.x+pixelV*deltaV.x);
     pixel1D.y=(uvOrigin.y+pixelU*deltaU.y+pixelV*deltaV.y);
     pixel1D.z=(uvOrigin.z+pixelU*deltaU.z+pixelV*deltaV.z);
 
     // changing source for each u, v
-    // o (0,0,0) est� no canto da imagem, uvorigem � o canto do detector nessa geometria
+    // o (0,0,0) esta no canto da imagem, uvorigem eh o canto do detector nessa geometria
 
     float gelTubeRadius = auxParams2.x/geo.dVoxelX; //aux2.x;
     float nWater = auxParams2.y; //aux2.y;
@@ -367,25 +340,30 @@ __global__ void kernelPixelDetector( Geometry geo,
     ray.z=(fabsf(ray.z)<eps)? 0 : ray.z;
 
     // if ray dont pass thrugh gel tube, return 0
-    if (ray.y*0.5f + newSource.y < geo.nVoxelY/2 - gelTubeRadius || ray.y*0.5f + newSource.y > geo.nVoxelY/2 + gelTubeRadius) {
+    if (ray.y*0.5f + newSource.y < geo.nVoxelY*0.5f - gelTubeRadius || ray.y*0.5f + newSource.y > geo.nVoxelY*0.5f + gelTubeRadius) {
         detector[idx] = 0;
         return;
     }
 
     Point3D Q;
-    Q.x = newSource.x - geo.nVoxelX/2;
-    Q.y = newSource.y - geo.nVoxelY/2;
+    Q.x = newSource.x - geo.nVoxelX*0.5f;
+    Q.y = newSource.y - geo.nVoxelY*0.5f;
     Q.z = 0;
+    float a1, a2;
 
-    float aux1 = -2 * Q.x * ray.x - 2 * Q.y * ray.y;
-    aux1 = aux1*aux1;
-    float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y);
-    float aux3 = (gelTubeRadius * gelTubeRadius - Q.x * Q.x - Q.y * Q.y);
-    float aux4 = 2 * Q.x * ray.x + 2 * Q.y * ray.y;
-    float aux5 = 2 * (ray.x * ray.x + ray.y * ray.y);
+    if (true) {
+        float aux1 = -2 * Q.x * ray.x - 2 * Q.y * ray.y;
+        aux1 = aux1*aux1;
+        float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y);
+        float aux3 = (gelTubeRadius * gelTubeRadius - Q.x * Q.x - Q.y * Q.y);
+        float aux4 = 2 * Q.x * ray.x + 2 * Q.y * ray.y;
+        float aux5 = 2 * (ray.x * ray.x + ray.y * ray.y);
 
-    float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
-    float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+        a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+        a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
+    }
+
+
 
     // points where ray intersects the gel tube
     Point3D Q1, Q2;
@@ -481,74 +459,56 @@ __global__ void kernelPixelDetector( Geometry geo,
     
     float sum=0.0f;
     float traveledLength;
-    unsigned long Np=(imax-imin+1)+(jmax-jmin+1)+(kmax-kmin+1); // Number of intersections
+    
     // Go iterating over the line, intersection by intersection. If double point, no worries, 0 will be computed
     i+=0.5f;
     j+=0.5f;
     k+=0.5f;
     
     float gelTubeRadiusSquare = gelTubeRadius * gelTubeRadius;
-    bool rayHasRefracted = false;
     bool rayGotPrisioned = false;
-    bool rayHasExited = false;
 
-    while (!rayHasExited && !rayGotPrisioned){
+    if (ax==aminc){
+        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
+    }else if(ay==aminc){
+        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j+ju, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
+    }else if(az==aminc){
+        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j, k+ku, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
+    }
 
-        if (!rayHasRefracted) {
-            if (ax==aminc){
-                rayHasRefracted = true;
-                setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
-            }else if(ay==aminc){
-                rayHasRefracted = true;
-                setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j+ju, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
-            }else if(az==aminc){
-                rayHasRefracted = true;
-                setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j, k+ku, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
-            }
-        } else { //has refracted
-            float givenDistanceToTubeCenterSquare = (i - geo.nVoxelX*0.5f)*(i - geo.nVoxelX*0.5f)+(j - geo.nVoxelY*0.5f)*(j - geo.nVoxelY*0.5f);
+    imax = i + ray.x * traveledLength;
+    jmax = j + ray.y * traveledLength;
+    kmax = k + ray.z * traveledLength;
+    unsigned long Np=(fabsf(imax-i)+1)+(fabsf(jmax-j)+1)+(fabsf(kmax-k)+1); // Number of intersections
 
-            if (ax==aminc){
-                sum+=(ax-ac)*tex3D<float>(tex, i, j, k);
-                float nextDistanceToTubeCenterSquare = (i+iu - geo.nVoxelX/2)*(i+iu - geo.nVoxelX/2)+(j - geo.nVoxelY/2)*(j - geo.nVoxelY/2);
-
-                if(
-                    givenDistanceToTubeCenterSquare <= gelTubeRadiusSquare
-                    && nextDistanceToTubeCenterSquare > gelTubeRadiusSquare
-                ){
-                    rayHasExited = true;
-                    setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
-                }
-
-                i=i+iu;
-                ac=ax;
-                ax+=axu;
-            }else if(ay==aminc){
-                sum+=(ay-ac)*tex3D<float>(tex, i, j, k);
-                float nextDistanceToTubeCenterSquare = (i - geo.nVoxelX*0.5f)*(i - geo.nVoxelX*0.5f)+(j+ju - geo.nVoxelY*0.5f)*(j+ju - geo.nVoxelY*0.5f);
-
-                if(
-                    givenDistanceToTubeCenterSquare <= gelTubeRadiusSquare
-                    && nextDistanceToTubeCenterSquare > gelTubeRadiusSquare
-                ){
-                    rayHasExited = true;
-                    setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
-                }
-
-                j=j+ju;
-                ac=ay;
-                ay+=ayu;
-            }else if(az==aminc){
-                sum+=(az-ac)*tex3D<float>(tex, i, j, k);
-                k=k+ku;
-                ac=az;
-                az+=azu;
-            }
+#pragma unroll
+    for (int interactions = 0; interactions < Np; interactions++){
+        if (ax==aminc){
+            sum+=(ax-ac)*tex3D<float>(tex, i, j, k);
+            i=i+iu;
+            ac=ax;
+            ax+=axu;
+        }else if(ay==aminc){
+            sum+=(ay-ac)*tex3D<float>(tex, i, j, k);
+            j=j+ju;
+            ac=ay;
+            ay+=ayu;
+        }else if(az==aminc){
+            sum+=(az-ac)*tex3D<float>(tex, i, j, k);
+            k=k+ku;
+            ac=az;
+            az+=azu;
         }
-
-        if (rayGotPrisioned) break;
-        
+    
         aminc=fminf(fminf(ax,ay),az);
+    }
+
+    if (ax==aminc){
+        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
+    }else if(ay==aminc){
+        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j+ju, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
+    }else if(az==aminc){
+        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j, k+ku, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
     }
 
     if (rayGotPrisioned) {

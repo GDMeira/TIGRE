@@ -58,6 +58,11 @@ void computeDeltas_Siddon(Geometry geo,int i, Point3D* uvorigin, Point3D* deltaU
 void splitImage(unsigned int splits,Geometry geo,Geometry* geoArray, unsigned int nangles);
 void freeGeoArray(unsigned int splits,Geometry* geoArray);
 //double maxDistanceCubeXY(Geometry geo, double alpha,int i);
+void setNewDirections(
+    Point3D& ray, Geometry geo,  unsigned long& i, unsigned long& j, unsigned long& k, float& iu, float& ju, float& ku, float iNext, float jNext, float kNext,
+    float& axu, float& ayu, float& azu, float& ax, float& ay, float& az, float& ac, bool& rayGotPrisioned, float nIncidence, float nRefraction, float tubeRadius,
+    float& aminc, float& traveledLength
+);
 
 
 #endif

@@ -56,4 +56,5 @@ void computeDeltasCube(Geometry geo,int i, Point3D* xyzorigin, Point3D* deltaX, 
 void createGeoArray(unsigned int image_splits, Geometry geo,Geometry* geoArray, unsigned int nangles);
 void freeGeoArray(unsigned int splits,Geometry* geoArray);
 void checkFreeMemory(const GpuIds& gpuids,size_t *mem_GPU_global);
+Point3D getNewDirections(Point3D Q, Point3D ray, float nIncidence, float nRefraction, bool& rayGotPrisioned)
 #endif
