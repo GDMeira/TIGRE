@@ -46,7 +46,9 @@
  * Codes  : https://github.com/CERN/TIGRE
  * ---------------------------------------------------------------------------
  */
-#define  PI_4 0.78539816
+#define  PI_4 0.7853981634
+#define  PI_2 1.570796327
+#define  PI_1 3.141592654
 #include <algorithm>
 #include <cuda_runtime_api.h>
 #include <cuda.h>
@@ -60,13 +62,15 @@ do { \
         if (__err != cudaSuccess) { \
                 mexPrintf("%s \n",msg);\
                 mexErrMsgIdAndTxt("Ax:Siddon_projection",cudaGetErrorString(__err));\
+                cudaDeviceReset();\
         } \
 } while (0)
     
     
 #define MAXTREADS 1024
-#define PROJ_PER_BLOCK 9
-#define PIXEL_SIZE_BLOCK 9
+#define PROJ_PER_BLOCK 32
+#define PIXEL_SIZE_BLOCK 16
+#define RAYS_PER_PIXEL 55 // Number of rays per pixel, must be even
     /*GEOMETRY DEFINITION
      *
      *                Detector plane, behind
@@ -105,151 +109,7 @@ __global__ void vecAddInPlace(float *a, float *b, unsigned long  n)
     // Make sure we do not go out of bounds
     if (idx < n)
         a[idx] = a[idx] + b[idx];
-}
-
-__device__ void setNewDirections(
-    Point3D& ray, Geometry geo,  unsigned long& i, unsigned long& j, unsigned long& k, float& iu, float& ju, float& ku, float iNext, float jNext, float kNext,
-    float& axu, float& ayu, float& azu, float& ax, float& ay, float& az, float& ac, bool& rayGotPrisioned, float nIncidence, float nRefraction, float tubeRadius,
-    float& aminc, float& traveledLength
-){
-    float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
-    Point3D v1, P, C, n, N, v2, nextPoint;
-
-    // incident ray versor
-    v1.x = ray.x / rayLength;
-    v1.y = ray.y / rayLength;
-    v1.z = ray.z / rayLength;
-
-    // P = (i, j, k) refraction point
-    P.x = i;
-    P.y = j;
-    P.z = k;
-
-    // C = (geo.sVoxelX/2, geo.sVoxelY/2, P.z) center of the tube with P height
-    C.x = geo.nVoxelX*0.5f;
-    C.y = geo.nVoxelY*0.5f;
-    C.z = P.z;
-
-    // n = (P - C) / ||P - C|| normal vector to tube surface
-    float nLength = __fsqrt_rd((P.x - C.x)*(P.x - C.x) + (P.y - C.y)*(P.y - C.y));
-    n.x = (P.x - C.x) / nLength;
-    n.y = (P.y - C.y) / nLength;
-    n.z = 0;
-
-    float incidenceAngle = acosf(v1.x*n.x + v1.y*n.y + v1.z*n.z);
-    if (incidenceAngle == 0) return;
-
-    float refractionAngle = asinf(nIncidence * sinf(incidenceAngle) / nRefraction);
-    if (refractionAngle > PI_4) {
-        rayGotPrisioned = true;
-        return;
-    }
-
-    // N = n x v1 normal to the plane formed by n and v1 and v2
-    N.x = -n.y * v1.z;
-    N.y = n.x * v1.z;
-    N.z = v1.x * n.y - v1.y * n.x;
-
-    // v2 is the refracted ray
-    if (v1.z == 0) {
-        v2.z = 0; // v2 has to be in same plane as v1
-        v2.y = 1; // initial guess. We know it will be the same sign as v1.y
-        v2.x = __fdividef(-cosf(refractionAngle) - n.y, n.x);
-        // check if initial guess is correct
-        if (v2.x * v1.x + v2.y * v1.y < 0) {
-            v2.y = -1;
-            v2.x = __fdividef(-cosf(refractionAngle) + n.y, n.x);
-        }
-    } else {
-        v2.z = v1.z; // initial guess. We know it will be the same sign as v1.z
-        v2.y = (-N.x * cosf(refractionAngle) + v2.z * (n.x*N.z - n.z*N.x)) / (N.x*n.y - n.x*N.y);
-        v2.x = (-v2.y * N.y - N.z * v2.z) / N.x;
-    }
-
-    // normalize v2
-    float v2Length = __fsqrt_rd(v2.x*v2.x + v2.y*v2.y + v2.z*v2.z);
-    v2.x = v2.x / v2Length;
-    v2.y = v2.y / v2Length;
-    v2.z = v2.z / v2Length;
-
-    if (nIncidence > nRefraction) { // ray is leaving the tube
-        ray = v2;
-        return;
-    }
-
-    float t;
-
-    if (true) {
-        Point3D aux;
-        aux.x = P.x - C.x;
-        aux.y = P.y - C.y;
-        aux.z = 0;
-
-        float aux1 = -2 * aux.x * v2.x - 2 * aux.y * v2.y;
-        aux1 = aux1*aux1;
-        float aux2 = 4 * (-v2.x * v2.x - v2.y * v2.y);
-        float aux3 = (tubeRadius * tubeRadius - aux.x * aux.x - aux.y * aux.y);
-        float aux4 = 2 * aux.x * v2.x + 2 * aux.y * v2.y;
-        float aux5 = 2 * (v2.x * v2.x + v2.y * v2.y);
-
-        float a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
-        float a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
-
-        if (fabsf(a1) > fabsf(a2)) {
-            t = a1;
-        } else {
-            t = a2;
-        }
-    }
-
-    // update curent point
-    i = iNext;
-    j = jNext;
-    k = kNext;
-
-    // v2*t is the distance from P to the next refraction point
-    v2.x = v2.x * t;
-    v2.y = v2.y * t;
-    v2.z = v2.z * t;
-
-    if (nIncidence < nRefraction) {
-        traveledLength = t;
-    }
-
-    float eps=0.001;
-    v2.x=(fabsf(v2.x)<eps)? 0 : v2.x;
-    v2.y=(fabsf(v2.y)<eps)? 0 : v2.y;
-    v2.z=(fabsf(v2.z)<eps)? 0 : v2.z;
-    
-    ray = v2;
-
-    // restart the process
-    ac=0.0f;
-
-    // get intersection point N1. eq(20-21) [(also eq 9-10)]
-    ax = __frcp_rd(fabsf(ray.x));
-    ay = __frcp_rd(fabsf(ray.y));
-    az = __frcp_rd(fabsf(ray.z));
-    
-    // If its Infinite (i.e. ray is perpendicular to axis), make sure its positive
-    ax=(isinf(ax))? abs(ax) : ax;
-    ay=(isinf(ay))? abs(ay) : ay;
-    az=(isinf(az))? abs(az) : az;    
-       
-    
-    // get index of first intersection. eq (26) and (19)
-    aminc=fminf(fminf(ax,ay),az);
-
-    //eq (28), unit anlges
-    axu = ax;
-    ayu = ay;
-    azu = az;
-    // eq(29), direction of update
-    iu=(v2.x > 0)? 1.0f : -1.0f;
-    ju=(v2.y > 0)? 1.0f : -1.0f;
-    ku=(v2.z > 0)? 1.0f : -1.0f;
-}
-    
+}    
 
 __global__ void kernelPixelDetector( Geometry geo,
         float* detector,
@@ -257,10 +117,15 @@ __global__ void kernelPixelDetector( Geometry geo,
         const int totalNoOfProjections,
         cudaTextureObject_t tex){
     
-    
     unsigned long long u = blockIdx.x * blockDim.x + threadIdx.x;
     unsigned long long v = blockIdx.y * blockDim.y + threadIdx.y;
     unsigned long long projNumber=threadIdx.z;
+    unsigned long long ui=blockIdx.z;
+    // unsigned long long ui=threadIdx.z%RAYS_PER_PIXEL;
+    // unsigned long long projNumber=threadIdx.z/RAYS_PER_PIXEL;
+
+    float gelTubeRadius = projParamsArrayDev[6 * projNumber + 5].x; //aux2.x;
+    u += (unsigned long long)geo.nVoxelY/2 - gelTubeRadius / geo.dVoxelY;
     
     
     if (u>= geo.nDetecU || v>= geo.nDetecV || projNumber>=PROJ_PER_BLOCK)
@@ -283,18 +148,8 @@ __global__ void kernelPixelDetector( Geometry geo,
     Point3D auxParams1 = projParamsArrayDev[6 * projNumber + 4];
     Point3D auxParams2 = projParamsArrayDev[6 * projNumber + 5];
 
-    /////// Get coordinates XYZ of pixel UV
-    unsigned long pixelV = geo.nDetecV-v-1;
-    unsigned long pixelU = u;
-    Point3D pixel1D;
-    pixel1D.x=(uvOrigin.x+pixelU*deltaU.x+pixelV*deltaV.x);
-    pixel1D.y=(uvOrigin.y+pixelU*deltaU.y+pixelV*deltaV.y);
-    pixel1D.z=(uvOrigin.z+pixelU*deltaU.z+pixelV*deltaV.z);
-
-    // changing source for each u, v
-    // o (0,0,0) esta no canto da imagem, uvorigem eh o canto do detector nessa geometria
-
-    float gelTubeRadius = auxParams2.x/geo.dVoxelX; //aux2.x;
+    // float gelTubeRadius = auxParams2.x/geo.dVoxelX;
+    gelTubeRadius = gelTubeRadius / geo.dVoxelX;
     float nWater = auxParams2.y; //aux2.y;
     float nGel = auxParams2.z; //aux2.z;
     float DSD = auxParams1.x;
@@ -303,257 +158,569 @@ __global__ void kernelPixelDetector( Geometry geo,
     float h = geo.dDetecU * (DSD - DSO) / (EPS - geo.dDetecU);
     float fGrowth = EPS * (DSD + h) / (DSD - DSO + h);
 
-    float pixelUd = pixelU - (float)(geo.nDetecU - 1) * 0.5f;
-    float pixelVd = pixelV - (float)(geo.nDetecV - 1) * 0.5f; 
+// #pragma unroll
+//     for (int ui = 0; ui < RAYS_PER_PIXEL; ui++){
+//         #pragma unroll
+//         for (int vi = 0; vi < RAYS_PER_PIXEL; vi++){
+            ///// Get coordinates XYZ of pixel UV
+            // float pixelV = geo.nDetecV-v-1 - (vi - RAYS_PER_PIXEL/2) / RAYS_PER_PIXEL;
 
-    //Point3D deltaUd, deltaVd;
-    //deltaUd.x = deltaU.x / geo.dDetecU * fGrowth;
-    //deltaUd.y = deltaU.y / geo.dDetecU * fGrowth;
-    //deltaUd.z = deltaU.z / geo.dDetecU * fGrowth;
+            float pixelU = u + (ui+0.5f - RAYS_PER_PIXEL/2) / RAYS_PER_PIXEL;
+            float pixelV = geo.nDetecV-v-1 -(ui+0.5f - RAYS_PER_PIXEL/2) / RAYS_PER_PIXEL;
 
-    //deltaVd.x = deltaV.x / geo.dDetecV * fGrowth;
-    //deltaVd.y = deltaV.y / geo.dDetecV * fGrowth;
-    //deltaVd.z = deltaV.z / geo.dDetecV * fGrowth;
+            // float uiHC = 2;
+            // float pixelU = u + (uiHC ) / (10*2);
+            // float pixelV = geo.nDetecV-v-1;
 
-    //source.x += pixelUd * deltaUd.x + pixelVd * deltaVd.x;
-    //source.y += pixelUd * deltaUd.y + pixelVd * deltaVd.y;
-    //source.z += pixelUd * deltaUd.z + pixelVd * deltaVd.z;
-    Point3D newSource;
+            Point3D pixel1D;
+            pixel1D.x=(uvOrigin.x+pixelU*deltaU.x+pixelV*deltaV.x);
+            pixel1D.y=(uvOrigin.y+pixelU*deltaU.y+pixelV*deltaV.y);
+            pixel1D.z=(uvOrigin.z+pixelU*deltaU.z+pixelV*deltaV.z);
 
-    newSource.x = source.x + fGrowth * ( __fdividef(pixelUd * deltaU.x, geo.dDetecU) + __fdividef(pixelVd * deltaV.x, geo.dDetecV) );
-    newSource.y = source.y + fGrowth * ( __fdividef(pixelUd * deltaU.y, geo.dDetecU) + __fdividef(pixelVd * deltaV.y, geo.dDetecV) );
-    newSource.z = source.z + fGrowth * ( __fdividef(pixelUd * deltaU.z, geo.dDetecU) + __fdividef(pixelVd * deltaV.z, geo.dDetecV) );
+            // changing source for each u, v
+            // o (0,0,0) esta no canto da imagem, uvorigem eh o canto do detector nessa geometria
 
-    ///////
-    // Siddon's ray-voxel intersection, optimized as in doi=10.1.1.55.7516
-    //////
-    // Also called Jacobs algorithms
-    Point3D ray;
-    // vector of Xray
-    ray.x=pixel1D.x - newSource.x;
-    ray.y=pixel1D.y - newSource.y;
-    ray.z=pixel1D.z - newSource.z;
+            float pixelUs = pixelU - (float)(geo.nDetecU - 1) * 0.5f;
+            float pixelVs = pixelV - (float)(geo.nDetecV - 1) * 0.5f; 
 
-    float eps=0.001;
-    ray.x=(fabsf(ray.x)<eps)? 0 : ray.x;
-    ray.y=(fabsf(ray.y)<eps)? 0 : ray.y;
-    ray.z=(fabsf(ray.z)<eps)? 0 : ray.z;
+            //Point3D deltaUd, deltaVd;
+            //deltaUd.x = deltaU.x / geo.dDetecU * fGrowth;
+            //deltaUd.y = deltaU.y / geo.dDetecU * fGrowth;
+            //deltaUd.z = deltaU.z / geo.dDetecU * fGrowth;
 
-    // if ray dont pass thrugh gel tube, return 0
-    if (ray.y*0.5f + newSource.y < geo.nVoxelY*0.5f - gelTubeRadius || ray.y*0.5f + newSource.y > geo.nVoxelY*0.5f + gelTubeRadius) {
-        detector[idx] = 0;
-        return;
-    }
+            //deltaVd.x = deltaV.x / geo.dDetecV * fGrowth;
+            //deltaVd.y = deltaV.y / geo.dDetecV * fGrowth;
+            //deltaVd.z = deltaV.z / geo.dDetecV * fGrowth;
 
-    Point3D Q;
-    Q.x = newSource.x - geo.nVoxelX*0.5f;
-    Q.y = newSource.y - geo.nVoxelY*0.5f;
-    Q.z = 0;
-    float a1, a2;
+            //source.x += pixelUs * deltaUd.x + pixelVs * deltaVd.x;
+            //source.y += pixelUs * deltaUd.y + pixelVs * deltaVd.y;
+            //source.z += pixelUs * deltaUd.z + pixelVs * deltaVd.z;
+            Point3D newSource;
 
-    if (true) {
-        float aux1 = -2 * Q.x * ray.x - 2 * Q.y * ray.y;
-        aux1 = aux1*aux1;
-        float aux2 = 4 * (-ray.x * ray.x - ray.y * ray.y);
-        float aux3 = (gelTubeRadius * gelTubeRadius - Q.x * Q.x - Q.y * Q.y);
-        float aux4 = 2 * Q.x * ray.x + 2 * Q.y * ray.y;
-        float aux5 = 2 * (ray.x * ray.x + ray.y * ray.y);
+            newSource.x = source.x + fGrowth * ( __fdividef(pixelUs * deltaU.x, geo.dDetecU) + __fdividef(pixelVs * deltaV.x, geo.dDetecV) );
+            newSource.y = source.y + fGrowth * ( __fdividef(pixelUs * deltaU.y, geo.dDetecU) + __fdividef(pixelVs * deltaV.y, geo.dDetecV) );
+            newSource.z = source.z + fGrowth * ( __fdividef(pixelUs * deltaU.z, geo.dDetecU) + __fdividef(pixelVs * deltaV.z, geo.dDetecV) );
 
-        a1 = (-__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
-        a2 = (__fsqrt_rd(aux1 - aux2 * aux3) - aux4) / aux5;
-    }
+            ///////
+            // Siddon's ray-voxel intersection, optimized as in doi=10.1.1.55.7516
+            //////
+            // Also called Jacobs algorithms
+            Point3D ray;
+            // vector of Xray
+            ray.x=pixel1D.x - newSource.x;
+            ray.y=pixel1D.y - newSource.y;
+            ray.z=pixel1D.z - newSource.z;
 
+            float eps=0.000001;
+            // ray.x=(abs(ray.x)<eps)? 0 : ray.x;
+            // ray.y=(abs(ray.y)<eps)? 0 : ray.y;
+            // ray.z=(abs(ray.z)<eps)? 0 : ray.z;
 
+            float distanceToCenterInTheMiddleOfImage = (ray.y*0.5f + newSource.y - geo.nVoxelY*0.5f) * (ray.y*0.5f + newSource.y - geo.nVoxelY*0.5f) + (ray.x*0.5f + newSource.x - geo.nVoxelX*0.5f) * (ray.x*0.5f + newSource.x - geo.nVoxelX*0.5f);
 
-    // points where ray intersects the gel tube
-    Point3D Q1, Q2;
-    Q1.x = newSource.x + a1 * ray.x;
-    Q1.y = newSource.y + a1 * ray.y;
-    Q1.z = newSource.z + a1 * ray.z;
-    Q2.x = newSource.x + a2 * ray.x;
-    Q2.y = newSource.y + a2 * ray.y;
-    Q2.z = newSource.z + a2 * ray.z;
+            // if ray dont pass thrugh gel tube, return 0
+            if ( distanceToCenterInTheMiddleOfImage > gelTubeRadius * gelTubeRadius) {
+                // detector[idx] = 0;
+                return;
+            }
 
-    // This variables are ommited because
-    // bx,by,bz ={0,0,0}
-    // dx,dy,dz ={1,1,1}
-    // compute parameter values for x-ray parametric equation. eq(3-10)
-    float axm,aym,azm;
-    float axM,ayM,azM;
-    // In the paper Nx= number of X planes-> Nvoxel+1
-   
-    axm=fminf(__fdividef(Q1.x-newSource.x,ray.x),__fdividef(Q2.x-newSource.x,ray.x));
-    aym=fminf(__fdividef(Q1.y-newSource.y,ray.y),__fdividef(Q2.y-newSource.y,ray.y));
-    azm=fminf(__fdividef(Q1.z-newSource.z,ray.z),__fdividef(Q2.z-newSource.z,ray.z));
-    axM=fmaxf(__fdividef(Q1.x-newSource.x,ray.x),__fdividef(Q2.x-newSource.x,ray.x));
-    ayM=fmaxf(__fdividef(Q1.y-newSource.y,ray.y),__fdividef(Q2.y-newSource.y,ray.y));
-    azM=fmaxf(__fdividef(Q1.z-newSource.z,ray.z),__fdividef(Q2.z-newSource.z,ray.z));
-    
-    float am=fmaxf(fmaxf(axm,aym),azm);
-    float aM=fminf(fminf(axM,ayM),azM);
-    
-    // line intersects voxel space ->   am<aM
-    if (am>=aM){
-        detector[idx]=0;
-        return;
-    }
-    
-    // Compute max/min image INDEX for intersection eq(11-19)
-    // Discussion about ternary operator in CUDA: https://stackoverflow.com/questions/7104384/in-cuda-why-is-a-b010-more-efficient-than-an-if-else-version
-    float imin,imax,jmin,jmax,kmin,kmax;
-    // for X
-    if( newSource.x<pixel1D.x){
-        imin=ceilf (newSource.x+am*ray.x);
-        imax=floorf(newSource.x+aM*ray.x);
-    }else{
-        imax=floorf(newSource.x+am*ray.x);
-        imin=ceilf (newSource.x+aM*ray.x);
-    }
-    // for Y
-    if( newSource.y<pixel1D.y){
-        jmin=ceilf (newSource.y+am*ray.y);
-        jmax=floorf(newSource.y+aM*ray.y);
-    }else{
-        jmax=floorf(newSource.y+am*ray.y);
-        jmin=ceilf (newSource.y+aM*ray.y);
-    }
-    // for Z
-    if( newSource.z<pixel1D.z){
-        kmin=ceilf (newSource.z+am*ray.z);
-        kmax=floorf(newSource.z+aM*ray.z);
-    }else{
-        kmax=floorf(newSource.z+am*ray.z);
-        kmin=ceilf (newSource.z+aM*ray.z);
-    }
-    
-    // get intersection point N1. eq(20-21) [(also eq 9-10)]
-    float ax,ay,az;
-    ax=(newSource.x<pixel1D.x)?  __fdividef(imin-newSource.x,ray.x) :  __fdividef(imax-newSource.x,ray.x);
-    ay=(newSource.y<pixel1D.y)?  __fdividef(jmin-newSource.y,ray.y) :  __fdividef(jmax-newSource.y,ray.y);
-    az=(newSource.z<pixel1D.z)?  __fdividef(kmin-newSource.z,ray.z) :  __fdividef(kmax-newSource.z,ray.z);
-    
-    // If its Infinite (i.e. ray is parallel to axis), make sure its positive
-    ax=(isinf(ax))? abs(ax) : ax;
-    ay=(isinf(ay))? abs(ay) : ay;
-    az=(isinf(az))? abs(az) : az;    
-       
-    
-    // get index of first intersection. eq (26) and (19)
-    unsigned long i,j,k;
-    float aminc=fminf(fminf(ax,ay),az);
-    i=(unsigned long)floorf(newSource.x+ (aminc+am)*0.5f*ray.x);
-    j=(unsigned long)floorf(newSource.y+ (aminc+am)*0.5f*ray.y);
-    k=(unsigned long)floorf(newSource.z+ (aminc+am)*0.5f*ray.z);
-    // Initialize
-    float ac=am;
-    //eq (28), unit anlges
-    float axu,ayu,azu;
-    axu=__frcp_rd(fabsf(ray.x));
-    ayu=__frcp_rd(fabsf(ray.y));
-    azu=__frcp_rd(fabsf(ray.z));
-    // eq(29), direction of update
-    float iu,ju,ku;
-    iu=(newSource.x< pixel1D.x)? 1.0f : -1.0f;
-    ju=(newSource.y< pixel1D.y)? 1.0f : -1.0f;
-    ku=(newSource.z< pixel1D.z)? 1.0f : -1.0f;
-    
-    float sum=0.0f;
-    float traveledLength;
-    
-    // Go iterating over the line, intersection by intersection. If double point, no worries, 0 will be computed
-    i+=0.5f;
-    j+=0.5f;
-    k+=0.5f;
-    
-    float gelTubeRadiusSquare = gelTubeRadius * gelTubeRadius;
-    bool rayGotPrisioned = false;
+            Point3D Q;
+            Q.x = newSource.x - geo.nVoxelX*0.5f;
+            Q.y = newSource.y - geo.nVoxelY*0.5f;
+            Q.z = 0;
+            float a1, a2;
 
-    if (ax==aminc){
-        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
-    }else if(ay==aminc){
-        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j+ju, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
-    }else if(az==aminc){
-        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j, k+ku, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nWater, nGel, gelTubeRadius, aminc, traveledLength);
-    }
+            float aux1 = 2 * Q.x * ray.x + 2 * Q.y * ray.y;
+            float aux2 = ray.x * ray.x + ray.y * ray.y + ray.z * ray.z;
+            float aux3 = (-gelTubeRadius * gelTubeRadius + Q.x * Q.x + Q.y * Q.y);
 
-    imax = i + ray.x * traveledLength;
-    jmax = j + ray.y * traveledLength;
-    kmax = k + ray.z * traveledLength;
-    unsigned long Np=(fabsf(imax-i)+1)+(fabsf(jmax-j)+1)+(fabsf(kmax-k)+1); // Number of intersections
+            // no real solutions or only 1 solution
+            if (aux1*aux1 - 4 * aux2 * aux3 <= 0) return;
 
-#pragma unroll
-    for (int interactions = 0; interactions < Np; interactions++){
-        if (ax==aminc){
-            sum+=(ax-ac)*tex3D<float>(tex, i, j, k);
-            i=i+iu;
-            ac=ax;
+            a1 = (-__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
+            a2 = (__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
+
+            // points where ray intersects the gel tube
+            Point3D Q1, Q2;
+            Q1.x = newSource.x + a1 * ray.x;
+            Q1.y = newSource.y + a1 * ray.y;
+            Q1.z = newSource.z + a1 * ray.z;
+            Q2.x = newSource.x + a2 * ray.x;
+            Q2.y = newSource.y + a2 * ray.y;
+            Q2.z = newSource.z + a2 * ray.z;
+
+            // This variables are ommited because
+            // bx,by,bz ={0,0,0}
+            // dx,dy,dz ={1,1,1}
+            // compute parameter values for x-ray parametric equation. eq(3-10)
+            float axm,aym,azm;
+            float axM,ayM,azM;
+
+            // In the paper Nx= number of X planes-> Nvoxel+1
+            axm=min(__fdividef(Q1.x-newSource.x,ray.x),__fdividef(Q2.x-newSource.x,ray.x));
+            aym=min(__fdividef(Q1.y-newSource.y,ray.y),__fdividef(Q2.y-newSource.y,ray.y));
+            azm=min(__fdividef(Q1.z-newSource.z,ray.z),__fdividef(Q2.z-newSource.z,ray.z));
+            axM=max(__fdividef(Q1.x-newSource.x,ray.x),__fdividef(Q2.x-newSource.x,ray.x));
+            ayM=max(__fdividef(Q1.y-newSource.y,ray.y),__fdividef(Q2.y-newSource.y,ray.y));
+            azM=max(__fdividef(Q1.z-newSource.z,ray.z),__fdividef(Q2.z-newSource.z,ray.z));
+            
+            float am=max(max(axm,aym),azm);
+            float aM=min(min(axM,ayM),azM);
+            
+            // line intersects voxel space ->   am<aM
+            if (am>=aM){
+                // detector[idx]=0;
+                return;
+            }
+            
+            // Compute max/min image INDEX for intersection eq(11-19)
+            // Discussion about ternary operator in CUDA: https://stackoverflow.com/questions/7104384/in-cuda-why-is-a-b010-more-efficient-than-an-if-else-version
+            float imin,imax,jmin,jmax,kmin,kmax;
+            // for X
+            if( newSource.x<pixel1D.x){
+                imin= (newSource.x+am*ray.x);
+                imax=(newSource.x+aM*ray.x);
+            }else{
+                imax=(newSource.x+am*ray.x);
+                imin= (newSource.x+aM*ray.x);
+            }
+            // for Y
+            if( newSource.y<pixel1D.y){
+                jmin= (newSource.y+am*ray.y);
+                jmax=(newSource.y+aM*ray.y);
+            }else{
+                jmax=(newSource.y+am*ray.y);
+                jmin= (newSource.y+aM*ray.y);
+            }
+            // for Z
+            if( newSource.z<pixel1D.z){
+                kmin= (newSource.z+am*ray.z);
+                kmax=(newSource.z+aM*ray.z);
+            }else{
+                kmax=(newSource.z+am*ray.z);
+                kmin= (newSource.z+aM*ray.z);
+            }
+            
+            // get intersection point N1. eq(20-21) [(also eq 9-10)]
+            float ax,ay,az;
+            ax=(newSource.x<pixel1D.x)?  __fdividef(imin-newSource.x,ray.x) :  __fdividef(imax-newSource.x,ray.x);
+            ay=(newSource.y<pixel1D.y)?  __fdividef(jmin-newSource.y,ray.y) :  __fdividef(jmax-newSource.y,ray.y);
+            az=(newSource.z<pixel1D.z)?  __fdividef(kmin-newSource.z,ray.z) :  __fdividef(kmax-newSource.z,ray.z);
+            
+            // If its Infinite (i.e. ray is perpendicular to this axis), make sure its positive
+            ax=(isinf(ax))? abs(ax) : ax;
+            ay=(isinf(ay))? abs(ay) : ay;
+            az=(isinf(az))? abs(az) : az;
+            
+            
+            // get index of first intersection. eq (26) and (19)
+            float i,j,k;
+            float aminc=min(min(ax,ay),az);
+            i=newSource.x+ (aminc+am)*0.5f*ray.x;
+            j=newSource.y+ (aminc+am)*0.5f*ray.y;
+            k=newSource.z+ (aminc+am)*0.5f*ray.z;
+            // Initialize
+            float ac=am;
+            //eq (28), unit anlges
+            float axu,ayu,azu;
+            axu=__frcp_rd(abs(ray.x));
+            ayu=__frcp_rd(abs(ray.y));
+            azu=__frcp_rd(abs(ray.z));
+            // eq(29), direction of update
+            float iu,ju,ku;
+            iu=(newSource.x< pixel1D.x)? 1.0f : -1.0f;
+            ju=(newSource.y< pixel1D.y)? 1.0f : -1.0f;
+            ku=(newSource.z< pixel1D.z)? 1.0f : -1.0f;
+            
+            float sum=0.0f;
+            float traveledLength;
+
+            // refraction
+            float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
+            Point3D v1, P, C, n, N, v2;
+
+            // incident ray versor
+            v1.x = __fdividef(ray.x, rayLength);
+            v1.y = __fdividef(ray.y, rayLength);
+            v1.z = __fdividef(ray.z, rayLength);
+
+            // P = (i, j, k) refraction point
+            P.x = Q1.x;
+            P.y = Q1.y;
+            P.z = Q1.z;
+            // P.x = imin;
+            // P.y = jmin;
+            // P.z = kmin;
+
+            // C = (geo.sVoxelX/2, geo.sVoxelY/2, P.z) center of the tube with P height
+            C.x = geo.nVoxelX*0.5f;
+            C.y = geo.nVoxelY*0.5f;
+            C.z = P.z;
+
+            // n = (P - C) / ||P - C|| normal vector to tube surface
+            float nLength = __fsqrt_rd((P.x - C.x)*(P.x - C.x) + (P.y - C.y)*(P.y - C.y));
+            n.x = (P.x - C.x) / nLength;
+            n.y = (P.y - C.y) / nLength;
+            n.z = (P.z - C.z) / nLength; // 0
+
+            float incidenceAngle = acos(v1.x*n.x + v1.y*n.y + v1.z*n.z);
+            incidenceAngle = (incidenceAngle > PI_2) ? PI_1 - incidenceAngle : incidenceAngle;
+            float refractionAngle = asin(nWater * sin(incidenceAngle) / nGel);
+
+            // N = n x v1 normal to the plane formed by n and v1 and v2; n.z = 0
+            N.x = -n.y * v1.z;
+            N.y = n.x * v1.z;
+            N.z = v1.x * n.y - v1.y * n.x;
+
+            float cos_r = cos(refractionAngle);
+            float cos_ri = cos(incidenceAngle - refractionAngle);
+            
+            aux1 = v1.x*n.y*N.z - v1.y*n.x*N.z + v1.z * (n.x*N.y -n.y*N.x);
+
+            v2.x = (cos_ri * n.y*N.z - cos_r * (v1.z*N.y - v1.y*N.z)) / aux1;
+            v2.y = (cos_ri * (-n.x*N.z) - cos_r * (v1.x*N.z - v1.z*N.x)) / aux1;
+            v2.z = (cos_ri * (n.x*N.y - n.y*N.x) - cos_r * (v1.y*N.x - v1.x*N.y)) / aux1;
+
+            // normalize v2
+            float v2Length = __fsqrt_rd(v2.x*v2.x + v2.y*v2.y + v2.z*v2.z);
+            v2.x = __fdividef(v2.x,  v2Length);
+            v2.y = __fdividef(v2.y,  v2Length);
+            v2.z = __fdividef(v2.z,  v2Length);
+
+            float t;
+
+            Point3D aux;
+            aux.x = P.x - C.x;
+            aux.y = P.y - C.y;
+            aux.z = 0;
+
+            aux1 = 2 * aux.x * v2.x + 2 * aux.y * v2.y;
+            aux2 = v2.x * v2.x + v2.y * v2.y + v2.z * v2.z;
+            aux3 = (-gelTubeRadius * gelTubeRadius + aux.x * aux.x + aux.y * aux.y);
+
+            // no real solutions or only 1 solution
+            if (aux1*aux1 - 4 * aux2 * aux3 < 0) return;
+
+            a1 = (-__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
+            a2 = (__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
+
+            t = abs(a1) > abs(a2) ? a1 : a2;
+
+            // v2*t is the distance from P to the next refraction point
+            v2.x = v2.x * t;
+            v2.y = v2.y * t;
+            v2.z = v2.z * t;
+            // end of refraction
+
+            // save the ray traveled distance
+            traveledLength = t;
+
+            eps=0.000001;
+            // v2.x=(abs(v2.x)<eps)? 0 : v2.x;
+            // v2.y=(abs(v2.y)<eps)? 0 : v2.y;
+            // v2.z=(abs(v2.z)<eps)? 0 : v2.z;
+            
+            ray = v2;
+            newSource = P; //current point
+
+            Q1.x = newSource.x;
+            Q1.y = newSource.y;
+            Q1.z = newSource.z;
+            Q2.x = newSource.x + ray.x;
+            Q2.y = newSource.y + ray.y;
+            Q2.z = newSource.z + ray.z;
+
+            // In the paper Nx= number of X planes-> Nvoxel+1
+
+            // axm=min(__fdividef(Q1.x-newSource.x,ray.x),__fdividef(Q2.x-newSource.x,ray.x));
+            // aym=min(__fdividef(Q1.y-newSource.y,ray.y),__fdividef(Q2.y-newSource.y,ray.y));
+            // azm=min(__fdividef(Q1.z-newSource.z,ray.z),__fdividef(Q2.z-newSource.z,ray.z));
+            // axM=max(__fdividef(Q1.x-newSource.x,ray.x),__fdividef(Q2.x-newSource.x,ray.x));
+            // ayM=max(__fdividef(Q1.y-newSource.y,ray.y),__fdividef(Q2.y-newSource.y,ray.y));
+            // azM=max(__fdividef(Q1.z-newSource.z,ray.z),__fdividef(Q2.z-newSource.z,ray.z));
+            axm=0;
+            aym=0;
+            azm=0;
+            axM=1;
+            ayM=1;
+            azM=1;
+            
+            // am=max(max(axm,aym),azm); // 0
+            // aM=min(min(axM,ayM),azM); // 1
+            am=0; // 0
+            aM=1; // 1
+            
+            // line intersects voxel space ->   am<aM
+            if (am>=aM){
+                // detector[idx]=0;
+                return;
+            }
+
+            if( ray.x > 0){
+                imin=(am==axm)? Q1.x + 1.0f             : ceilf (newSource.x+am*ray.x);
+                imax=(aM==axM)? Q2.x + 1.0f             : floorf(newSource.x+aM*ray.x);
+            }else{
+                imax=(am==axm)? Q1.x             : floorf(newSource.x+am*ray.x);
+                imin=(aM==axM)? Q2.x             : ceilf (newSource.x+aM*ray.x);
+            }
+            // for Y
+            if( ray.y > 0){
+                jmin=(am==aym)? Q1.y + 1.0f             : ceilf (newSource.y+am*ray.y);
+                jmax=(aM==ayM)? Q2.y + 1.0f             : floorf(newSource.y+aM*ray.y);
+            }else{
+                jmax=(am==aym)? Q1.y             : floorf(newSource.y+am*ray.y);
+                jmin=(aM==ayM)? Q2.y             : ceilf (newSource.y+aM*ray.y);
+            }
+            // for Z
+            if( ray.z > 0){
+                kmin=(am==azm)? Q1.z + 1.0f             : ceilf (newSource.z+am*ray.z);
+                kmax=(aM==azM)? Q2.z + 1.0f             : floorf(newSource.z+aM*ray.z);
+            }else{
+                kmax=(am==azm)? Q1.z             : floorf(newSource.z+am*ray.z);
+                kmin=(aM==azM)? Q2.z             : ceilf (newSource.z+aM*ray.z);
+            }
+
+            // get intersection point N1. eq(20-21) [(also eq 9-10)]
+            ax=(ray.x>0)?  __fdividef(imin-newSource.x,ray.x) :  __fdividef(imax-newSource.x,ray.x);
+            ay=(ray.y>0)?  __fdividef(jmin-newSource.y,ray.y) :  __fdividef(jmax-newSource.y,ray.y);
+            az=(ray.z>0)?  __fdividef(kmin-newSource.z,ray.z) :  __fdividef(kmax-newSource.z,ray.z);
+            
+            // If its Infinite (i.e. ray is perpendicular to this axis), make sure its positive
+            ax=(isinf(ax))? abs(ax) : ax;
+            ay=(isinf(ay))? abs(ay) : ay;
+            az=(isinf(az))? abs(az) : az;    
+            // ax=(isinf(ax))? abs(ax) : ax + 0.5f;
+            // ay=(isinf(ay))? abs(ay) : ay + 0.5f;
+            // az=(isinf(az))? abs(az) : az + 0.5f;  
+            
+            // get index of first intersection. eq (26) and (19)
+            aminc=min(min(ax,ay),az);
+            i=floor(newSource.x+ (aminc+am)*0.5f*ray.x);
+            j=floor(newSource.y+ (aminc+am)*0.5f*ray.y);
+            k=floor(newSource.z+ (aminc+am)*0.5f*ray.z);
+            // Initialize
+            ac=am;
+            //eq (28), unit anlges
+            axu=__frcp_rd(abs(ray.x));
+            ayu=__frcp_rd(abs(ray.y));
+            azu=__frcp_rd(abs(ray.z));
+
+            // eq(29), direction of update
+            iu=(ray.x > 0)? 1.0f : -1.0f;
+            ju=(ray.y > 0)? 1.0f : -1.0f;
+            ku=(ray.z > 0)? 1.0f : -1.0f;
+
+            unsigned long Np=(abs(imax-imin)+1)+(abs(jmax-jmin)+1)+(abs(kmax-kmin)+1); // Number of intersections
+
+            // Go iterating over the line, intersection by intersection. If double point, no worries, 0 will be computed
+            i+=0.5f*iu;
+            j+=0.5f*ju;
+            k+=0.5f*ku;
             ax+=axu;
-        }else if(ay==aminc){
-            sum+=(ay-ac)*tex3D<float>(tex, i, j, k);
-            j=j+ju;
-            ac=ay;
             ay+=ayu;
-        }else if(az==aminc){
-            sum+=(az-ac)*tex3D<float>(tex, i, j, k);
-            k=k+ku;
-            ac=az;
             az+=azu;
-        }
-    
-        aminc=fminf(fminf(ax,ay),az);
-    }
+            aminc=min(min(ax,ay),az);
 
-    if (ax==aminc){
-        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i+iu, j, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
-    }else if(ay==aminc){
-        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j+ju, k, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
-    }else if(az==aminc){
-        setNewDirections(ray, geo, i, j, k, iu, ju, ku, i, j, k+ku, axu, ayu, azu, ax, ay, az, ac, rayGotPrisioned, nGel, nWater, gelTubeRadius, aminc, traveledLength);
-    }
+        #pragma unroll
+            for (unsigned long interactions = 0; interactions < Np; interactions++){
+                if (ax==aminc){
+                    sum+=(ax-ac)*tex3D<float>(tex, i, j, k);
+                    // sum+=tex3D<float>(tex, i, j, k);
+                    i=i+iu;
+                    ac=ax;
+                    ax+=axu;
+                }else if(ay==aminc){
+                    sum+=(ay-ac)*tex3D<float>(tex, i, j, k);
+                    // sum+=tex3D<float>(tex, i, j, k);
+                    j=j+ju;
+                    ac=ay;
+                    ay+=ayu;
+                }else if(az==aminc){
+                    sum+=(az-ac)*tex3D<float>(tex, i, j, k);
+                    // sum+=tex3D<float>(tex, i, j, k);
+                    k=k+ku;
+                    ac=az;
+                    az+=azu;
+                }
+            
+                aminc=min(min(ax,ay),az);
+            }
 
-    if (rayGotPrisioned) {
-        detector[idx] = 0;
-        return;
-    }
+            // refraction
+            rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z); //t
+            // Point3D v1, P, C, n, N, v2;
 
-    Point3D N;
-    // N = deltaV x deltaU, normal to the detector plane and deltaV is the vertical vector
-    N.x = - deltaV.z*deltaU.y;
-    N.y = deltaV.z*deltaU.x;
-    N.z = 0;
+            // incident ray versor
+            v1.x = __fdividef(ray.x, rayLength);
+            v1.y = __fdividef(ray.y, rayLength);
+            v1.z = __fdividef(ray.z, rayLength);
 
-    float NScalarRay = N.x*ray.x + N.y*ray.y + N.z*ray.z;
+            // P = (i, j, k) refraction point
+            P.x = Q2.x;
+            P.y = Q2.y;
+            P.z = Q2.z;
 
-    if (NScalarRay == 0) {
-        detector[idx] = 0;
-        return;
-    }
+            // C = (geo.sVoxelX/2, geo.sVoxelY/2, P.z) center of the tube with P height
+            C.x = geo.nVoxelX*0.5f;
+            C.y = geo.nVoxelY*0.5f;
+            C.z = P.z;
 
-    float t = (N.x*(uvOrigin.x - i) + N.y*(uvOrigin.y - j) + N.z*(uvOrigin.z - k)) / NScalarRay;
+            // n = (C - P) / ||P - C|| normal vector to tube surface (opposite direction)
+            nLength = __fsqrt_rd((P.x - C.x)*(P.x - C.x) + (P.y - C.y)*(P.y - C.y));
+            n.x = __fdividef((C.x - P.x), nLength);
+            n.y = __fdividef((C.y - P.y), nLength);
+            n.z = 0;
 
-    Point3D intersectionPoint;
-    // intersection point between ray and detector plane
-    intersectionPoint.x = i + t*ray.x;
-    intersectionPoint.y = j + t*ray.y;
-    intersectionPoint.z = k + t*ray.z;
+            incidenceAngle = acos(v1.x*n.x + v1.y*n.y + v1.z*n.z);
+            incidenceAngle = (incidenceAngle > PI_2) ? PI_1 - incidenceAngle : incidenceAngle;
 
-    float a,b;
-    // intersectionPoint = uvOrigin + a*deltaU + b*deltaV
-    b = (intersectionPoint.z - uvOrigin.z) / deltaV.z;
-    a = deltaU.x != 0 ? (intersectionPoint.x - uvOrigin.x) / deltaU.x : (intersectionPoint.y - uvOrigin.y) / deltaU.y;
+            if (nGel * sin(incidenceAngle) / nWater > 1) return;
+            refractionAngle = asin(nGel * sin(incidenceAngle) / nWater);
 
-    if (a < 0 || a > geo.nDetecU || b < 0 || b > geo.nDetecV) {
-        detector[idx] = 0;
-        return;
-    }
+            // N = n x v1 normal to the plane formed by n and v1 and v2; n.z = 0
+            N.x = -n.y * v1.z;
+            N.y = n.x * v1.z;
+            N.z = v1.x * n.y - v1.y * n.x;
 
-    // Calculate the pixel index
-    u = (unsigned long long)floorf(a);
-    v = (unsigned long long)floorf(b);
-    idx =  (size_t)(u * (unsigned long long)geo.nDetecV + v)+ projNumber*(unsigned long long)geo.nDetecV *(unsigned long long)geo.nDetecU ;
+            cos_r = cos(refractionAngle);
+            cos_ri = cos(refractionAngle - incidenceAngle);
+            
+            aux1 = v1.x*n.y*N.z - v1.y*n.x*N.z + v1.z * (n.x*N.y -n.y*N.x);
 
-    float oldValue = detector[idx] ? detector[idx] : 0;
-    detector[idx]=oldValue + sum*traveledLength*geo.dVoxelX;
+            v2.x = (cos_ri * n.y*N.z - cos_r * (v1.z*N.y - v1.y*N.z)) / aux1;
+            v2.y = (cos_ri * (-n.x*N.z) - cos_r * (v1.x*N.z - v1.z*N.x)) / aux1;
+            v2.z = (cos_ri * (n.x*N.y - n.y*N.x) - cos_r * (v1.y*N.x - v1.x*N.y)) / aux1;
+
+            // normalize v2
+            v2Length = __fsqrt_rd(v2.x*v2.x + v2.y*v2.y + v2.z*v2.z);
+            v2.x = __fdividef(v2.x,  v2Length);
+            v2.y = __fdividef(v2.y,  v2Length);
+            v2.z = __fdividef(v2.z,  v2Length);
+            
+            ray = v2;
+            // end of refraction
+
+            // N = deltaV x deltaU, normal to the detector plane and deltaV is the vertical vector
+            N.x = deltaV.y*deltaU.z - deltaV.z*deltaU.y;
+            N.y = deltaV.z*deltaU.x - deltaV.x*deltaU.z;
+            N.z = deltaV.x*deltaU.y - deltaV.y*deltaU.x;
+
+            // distance from current point P(i,j,k) to detector plane
+            t = __fdividef((N.x*(P.x - uvOrigin.x) + N.y*(P.y - uvOrigin.y) + N.z*(P.z - uvOrigin.z)), __fsqrt_rd(N.x*N.x + N.y*N.y + N.z*N.z));
+            // if (t < 0) return;
+
+            // intersection point between ray and detector plane
+            Point3D intersectionPoint;
+            eps = 1e-3;
+
+            if (t < 0) {
+                t = 0;
+                intersectionPoint.x = P.x + t*ray.x;
+                intersectionPoint.y = P.y + t*ray.y;
+                intersectionPoint.z = P.z + t*ray.z;
+
+                float scalarProduct = (intersectionPoint.x - uvOrigin.x)*N.x + (intersectionPoint.y - uvOrigin.y)*N.y + (intersectionPoint.z - uvOrigin.z)*N.z;
+                float minScalarProduct = scalarProduct;
+                float increment = geo.nVoxelX/2 - gelTubeRadius;
+
+                while (scalarProduct > eps) {
+                    if (scalarProduct > minScalarProduct) {
+                        t -= increment;
+                        increment = increment / 10;
+                    } else {
+                        minScalarProduct = scalarProduct;
+                    }
+
+                    t += increment;
+                    intersectionPoint.x = P.x + t*ray.x;
+                    intersectionPoint.y = P.y + t*ray.y;
+                    intersectionPoint.z = P.z + t*ray.z;
+                    scalarProduct = (intersectionPoint.x - uvOrigin.x)*N.x + (intersectionPoint.y - uvOrigin.y)*N.y + (intersectionPoint.z - uvOrigin.z)*N.z;
+
+                    if (t > DSD/geo.dVoxelX) return;
+                }
+            } else {
+                intersectionPoint.x = P.x + t*ray.x;
+                intersectionPoint.y = P.y + t*ray.y;
+                intersectionPoint.z = P.z + t*ray.z;
+            }
+
+            float a,b;
+            // intersectionPoint = uvOrigin + a*deltaU + b*deltaV
+            b = (intersectionPoint.z - uvOrigin.z) / deltaV.z;
+            // negatives are not being right calculated, but the error start after threshold
+            a = __fsqrt_rd((intersectionPoint.x - uvOrigin.x)*(intersectionPoint.x - uvOrigin.x) + (intersectionPoint.y - uvOrigin.y)*(intersectionPoint.y - uvOrigin.y)) / __fsqrt_rd(deltaU.x*deltaU.x + deltaU.y*deltaU.y);
+            
+            if ((intersectionPoint.x - uvOrigin.x)*deltaU.x + (intersectionPoint.y - uvOrigin.y)*deltaU.y < 0) {
+                a = -a;
+            }
+
+            float minU = geo.nVoxelY/2 - gelTubeRadius;
+            float maxU = geo.nVoxelY/2 + gelTubeRadius;
+
+            b = geo.nDetecV - 1 - b; // uvOrigin.z is on top of the detector
+
+            if (a < minU || a > maxU || b < 0 || b > geo.nDetecV - 1) {
+                // detector[idx] = 0;
+                return;
+            }
+
+            float resSum = sum*traveledLength*geo.dVoxelX/RAYS_PER_PIXEL;
+
+            u = (unsigned long long)(a);
+            v = (unsigned long long)(b);
+            idx =  (size_t)(u * (unsigned long long)geo.nDetecV + v)+ projNumber*(unsigned long long)geo.nDetecV *(unsigned long long)geo.nDetecU ;
+            atomicAdd(&detector[idx], resSum);
+            return;
+
+            // interpolation over next pixels if ray do not intersect a pixel center
+
+            // eps = geo.dDetecU/(100 * geo.dVoxelY);
+            // // if ray intersect a pixel center
+            // if (a - floor(a) < eps && b - floor(b) < eps ) {
+            //     // Calculate the pixel index
+            //     u = (unsigned long long)a;
+            //     v = (unsigned long long)b;
+            //     idx =  (size_t)(u * (unsigned long long)geo.nDetecV + v)+ projNumber*(unsigned long long)geo.nDetecV *(unsigned long long)geo.nDetecU ;
+            //     atomicAdd(&detector[idx], resSum);
+            //     // detector[idx] = resSum;
+            // } else {
+            //     float P1 = 1 / __fsqrt_rd( (floor(a)-a)*(floor(a)-a) + (floor(b)-b)*(floor(b)-b) );
+            //     float P2 = 1 / __fsqrt_rd( (ceil(a)-a)*(ceil(a)-a) + (floor(b)-b)*(floor(b)-b) );
+            //     float P3 = 1 / __fsqrt_rd( (floor(a)-a)*(floor(a)-a) + (ceil(b)-b)*(ceil(b)-b) );
+            //     float P4 = 1 / __fsqrt_rd( (ceil(a)-a)*(ceil(a)-a) + (ceil(b)-b)*(ceil(b)-b) );
+            //     float sumP = P1 + P2 + P3 + P4;
+
+            //     u = (unsigned long long)floor(a);
+            //     v = (unsigned long long)floor(b);
+            //     idx =  (size_t)(u * (unsigned long long)geo.nDetecV + v)+ projNumber*(unsigned long long)geo.nDetecV *(unsigned long long)geo.nDetecU ;
+            //     // atomicAdd(&detector[idx], P1/sumP*resSum);
+            //     atomicAdd(&detector[idx], resSum);
+            //     // detector[idx] = P1/sumP * resSum;
+
+            //     u = (unsigned long long)ceil(a);
+            //     v = (unsigned long long)floor(b);
+            //     idx =  (size_t)(u * (unsigned long long)geo.nDetecV + v)+ projNumber*(unsigned long long)geo.nDetecV *(unsigned long long)geo.nDetecU ;
+            //     // atomicAdd(&detector[idx], P2/sumP*resSum);
+            //     atomicAdd(&detector[idx], resSum);
+            //     // detector[idx] = P2/sumP * resSum;
+
+            //     u = (unsigned long long)floor(a);
+            //     v = (unsigned long long)ceil(b);
+            //     idx =  (size_t)(u * (unsigned long long)geo.nDetecV + v)+ projNumber*(unsigned long long)geo.nDetecV *(unsigned long long)geo.nDetecU ;
+            //     // atomicAdd(&detector[idx], P3/sumP*resSum);
+            //     atomicAdd(&detector[idx], resSum);
+            //     // detector[idx] = P3/sumP * resSum;
+
+            //     u = (unsigned long long)ceil(a);
+            //     v = (unsigned long long)ceil(b);
+            //     idx =  (size_t)(u * (unsigned long long)geo.nDetecV + v)+ projNumber*(unsigned long long)geo.nDetecV *(unsigned long long)geo.nDetecU ;
+            //     // atomicAdd(&detector[idx], P4/sumP*resSum);
+            //     atomicAdd(&detector[idx], resSum);
+            //     // detector[idx] = P4/sumP * resSum;
+            // }    
+        // }
+    // }
 }
 
 
@@ -583,6 +750,7 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
     
     // Does everything fit in the GPUs?
     const bool fits_in_memory = mem_image+2*PROJ_PER_BLOCK*mem_proj<mem_GPU_global;
+    mexPrintf("fits in memory? %d", (int)fits_in_memory);
     unsigned int splits=1;
     if (!fits_in_memory) {
         // Nope nope.
@@ -685,10 +853,15 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
         // Prepare kernel lauch variables
         
         int divU,divV;
-        divU=PIXEL_SIZE_BLOCK;
+        divU=PIXEL_SIZE_BLOCK/8;
+        // divU=PIXEL_SIZE_BLOCK;
         divV=PIXEL_SIZE_BLOCK;
-        dim3 grid((geoArray[sp].nDetecU+divU-1)/divU,(geoArray[0].nDetecV+divV-1)/divV,1);
-        dim3 block(divU,divV,PROJ_PER_BLOCK);
+        // dim3 blocks(ceil((geoArray[sp].nDetecU+divU-1)/divU),ceil((geoArray[0].nDetecV+divV-1)/divV),1);
+        // dim3 blocks(ceil((2*geoArray[sp].gelTubeRadius/geoArray[sp].dVoxelY+divU-1)/divU),ceil((2*geoArray[sp].nDetecV+divV-1)/divV),1);
+        // dim3 threadsPerBlock(divU,divV,divZ);
+
+        dim3 blocks(ceil((2*geoArray[sp].gelTubeRadius/geoArray[sp].dVoxelY+divU-1)/divU),ceil((2*geoArray[sp].nDetecV+divV-1)/divV),RAYS_PER_PIXEL);
+        dim3 threadsPerBlock(divU,divV,PROJ_PER_BLOCK);
         
         unsigned int proj_global;
         // Now that we have prepared the image (piece of image) and parameters for kernels
@@ -727,9 +900,10 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
                     projParamsArrayHost[6 * j + 5] = aux2;
                 }
                 cudaMemcpyToSymbolAsync(projParamsArrayDev, projParamsArrayHost, sizeof(Point3D)*6*PROJ_PER_BLOCK,0,cudaMemcpyHostToDevice,stream[dev*2]);
+                cudaMemset(dProjection[(i%2)+dev*2] ,0,num_bytes_proj);
                 cudaStreamSynchronize(stream[dev*2]);
                 cudaCheckErrors("kernel fail");
-                kernelPixelDetector<<<grid,block,0,stream[dev*2]>>>(geoArray[sp],dProjection[(i%2)+dev*2],i,nangles_device,texImg[dev]);
+                kernelPixelDetector<<<blocks,threadsPerBlock,0,stream[dev*2]>>>(geoArray[sp],dProjection[(i%2)+dev*2],i,nangles_device,texImg[dev]);
             }
 
             // Now that the computation is happening, we need to either prepare the memory for
@@ -753,7 +927,7 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
                         break;
 
                     // Unless its the last projection set, we have PROJ_PER_BLOCK angles. Otherwise...
-                    if(i+1==noOfKernelCalls) //is it the last block?
+                    if(i+1==noOfKernelCalls) //is it the last threadsPerBlock?
                         projection_this_block=min(nangles_device-(noOfKernelCalls-1)*PROJ_PER_BLOCK, //the remaining angles that this GPU had to do (almost never PROJ_PER_BLOCK)
                                                   nangles-proj_global);                              //or whichever amount is left to finish all (this is for the last GPU)
                     else
@@ -771,7 +945,7 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
                         break;
 
                     // Unless its the last projection set, we have PROJ_PER_BLOCK angles. Otherwise...
-                    if(i+1==noOfKernelCalls) //is it the last block?
+                    if(i+1==noOfKernelCalls) //is it the last threadsPerBlock?
                         projection_this_block=min(nangles_device-(noOfKernelCalls-1)*PROJ_PER_BLOCK, //the remaining angles that this GPU had to do (almost never PROJ_PER_BLOCK)
                                                   nangles-proj_global);                              //or whichever amount is left to finish all (this is for the last GPU)
                     else
@@ -792,7 +966,7 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
                     if (dev+1==deviceCount) {    //is it the last device?
                         // projections assigned to this device is >=nangles_device-(deviceCount-1) and < nangles_device
                         if (i-1 < noOfKernelCallsLastDev) {
-                            // The previous set(block) was not empty.
+                            // The previous set(threadsPerBlock) was not empty.
                             projection_this_block=min(PROJ_PER_BLOCK, nangles-proj_global);
                         }
                         else {

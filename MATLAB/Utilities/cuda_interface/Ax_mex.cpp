@@ -228,19 +228,19 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, mxArray const* prhs[]) {
             break;
         case 14:
             EPS = (double*)mxGetData(tmp);
-            geo.EPS = (float)*EPS;
+            geo.EPS = (float)EPS[0];
             break;
         case 15:
             gelTubeRadius = (double*)mxGetData(tmp);
-            geo.gelTubeRadius = (float)*gelTubeRadius;
+            geo.gelTubeRadius = (float)gelTubeRadius[0];
             break;
         case 16:
             nWater = (double*)mxGetData(tmp);
-            geo.nWater = (float)*nWater;
+            geo.nWater = (float)nWater[0];
             break;
         case 17:
             nGel = (double*)mxGetData(tmp);
-            geo.nGel = (float)*nGel;
+            geo.nGel = (float)nGel[0];
             break;
         default:
             mexErrMsgIdAndTxt("CBCT:MEX:Ax:unknown", "This should not happen. Weird");
