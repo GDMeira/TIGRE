@@ -118,7 +118,7 @@ __constant__ Point3D projParamsArrayDev[6*PROJ_PER_KERNEL];  // Dev means it is 
 // Point3D projParamsArrayHost[6*PROJ_PER_KERNEL];   // Host means it is host memory
 
 // Now we also need to store sinAlpha and cosAlpha for each projection (two floats per projection)
-__constant__ float projSinCosArrayDev[5*PROJ_PER_KERNEL];
+__constant__ float projSinCosArrayDev[6*PROJ_PER_KERNEL];
 
 
 
@@ -200,11 +200,12 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
         Point3D xyzOffset = projParamsArrayDev[6*projNumber+4];
         Point3D S = projParamsArrayDev[6*projNumber+5];
         
-        float sinalpha = projSinCosArrayDev[5*projNumber];     // 2*projNumber because we have 2 float (sin or cos angle) values per projection
-        float cosalpha = projSinCosArrayDev[5*projNumber+1];
-        float COR = projSinCosArrayDev[5*projNumber+2];
-        float DSD = projSinCosArrayDev[5*projNumber+3];
-        float DSO = projSinCosArrayDev[5*projNumber+4];
+        float sinalpha = projSinCosArrayDev[6*projNumber];     // 2*projNumber because we have 2 float (sin or cos angle) values per projection
+        float cosalpha = projSinCosArrayDev[6*projNumber+1];
+        float COR = projSinCosArrayDev[6*projNumber+2];
+        float DSD = projSinCosArrayDev[6*projNumber+3];
+        float DSO = projSinCosArrayDev[6*projNumber+4];
+        float EPS = projSinCosArrayDev[6 * projNumber + 5];
         
         float auxCOR=COR/geo.dDetecU;
         // Now iterate through Z in our voxel column FOR A GIVEN PROJECTION
@@ -224,73 +225,48 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
             P.y=(xyzOrigin.y+indX*deltaX.y+indY*deltaY.y+indZ*deltaZ.y)-auxCOR;
             P.z=(xyzOrigin.z+indX*deltaX.z+indY*deltaY.z+indZ*deltaZ.z);
 
-            Point3D detector;
-            detector.x = S.x + DSD;
-            detector.y = S.y;
-            detector.z = S.z;
+            // a origem está no centro da imagem, sobre o eixo de rotação
+            //Point3D detector;
+            //detector.x = -DSD + DSO; //x axis point to source
+            //detector.y = S.y;
+            //detector.z = S.z;
 
-            // TODO: otimizar a varredura dos pixels do detector
-            // OBS: talvez salvar esse valor de u, v para começar a partir dele na próxima varredura
-            float minDist = 10;
-            Point3D centerUV;
+            float h = geo.dDetecU * (DSD - DSO)/(EPS - geo.dDetecU);
 
-            for (size_t i = 0; i < geo.nDetecU; i++)
-            {
-                for (size_t j = 0; j < geo.nDetecV; j++)
-                {
-                    Point3D dUV, SUV, intercept;
-                    dUV.x = detector.x;
-                    dUV.y = detector.y + (i - geo.nDetecU/2);
-                    dUV.z = detector.z + (j - geo.nDetecV/2);
+            Point3D H; 
+            H.x = -DSD + DSO - h;
+            H.y = S.y;
+            H.z = S.z;
 
-                    SUV.x = S.x;
-                    SUV.y = S.y + (i - geo.nDetecU/2) * geo.EPS * DSD/(DSD - DSO) /geo.dDetecU;
-                    SUV.z = S.z + (j - geo.nDetecV/2) * geo.EPS * DSD/(DSD - DSO) /geo.dDetecV;
-
-                    intercept.x = (P.x - dUV.x)/DSD;
-                    intercept.y = (SUV.y - dUV.y) * intercept.x + dUV.y;
-                    intercept.z = (SUV.z - dUV.z) * intercept.x + dUV.z;
-
-                    float dist = sqrtf((intercept.y - P.y) * (intercept.y - P.y) + (intercept.z - P.z) * (intercept.z - P.z));
-
-                    if (dist < minDist)
-                    {
-                        centerUV.x = dist;
-                        centerUV.y = i;
-                        centerUV.z = j;
-                    }
-                    
-                }
-                
-            }
+            // This is the vector defining the line from the source to the Voxel
+            float vectX,vectY,vectZ;
+            vectX=(P.x -H.x);
+            vectY=(P.y -H.y);
+            vectZ=(P.z -H.z);
             
-
-
-            // // This is the vector defining the line from the source to the Voxel
-            // float vectX,vectY,vectZ;
-            // vectX=(P.x -S.x);
-            // vectY=(P.y -S.y);
-            // vectZ=(P.z -S.z);
-            
-            // // Get the coordinates in the detector UV where the mid point of the voxel is projected.
-            // float t=__fdividef(DSO-DSD-S.x,vectX);
-            // float y,z;
-            // y=vectY*t+S.y;
-            // z=vectZ*t+S.z;
-            // float u,v;
-            // u=y+(float)geo.nDetecU*0.5f;
-            // v=z+(float)geo.nDetecV*0.5f;
-
+            // Get the coordinates in the detector UV where the mid point of the voxel is projected.
+            float t=__fdividef(h, vectX);
+            float y,z;
+            y=vectY*t+H.y;
+            z=vectZ*t+H.z;
             float u,v;
-            u=(float)centerUV.y;
-            v=(float)centerUV.z;
+            u=y+(float)geo.nDetecU*0.5f;
+            v=z+(float)geo.nDetecV*0.5f;
+
+            Point3D SUV; //in real geometry (no scale)
+            SUV.x = S.x;
+            SUV.y = S.y + (u - (float)(geo.nDetecU - 1) * 0.5f) * EPS * __fdividef(DSD + h, DSD - DSO + h);
+            SUV.z = S.z + (v - (float)(geo.nDetecV - 1) * 0.5f) * EPS * __fdividef(DSD + h, DSD - DSO + h);
+            // SUV.y = S.y + (u - (float)(geo.nDetecU - 1) * 0.5f) * __fdividef(DSD + h, h) * geo.dDetecU;
+            // SUV.z = S.z + (v - (float)(geo.nDetecV - 1) * 0.5f) * __fdividef(DSD + h, h) * geo.dDetecV;
             
             float weight;
-            float realx,realy;
+            float realx, realy, realDSO;
             realx=-(geo.sVoxelX-geo.dVoxelX)*0.5f  +indX*geo.dVoxelX   +xyzOffset.x;
             realy=-(geo.sVoxelY-geo.dVoxelY)*0.5f  +indY*geo.dVoxelY   +xyzOffset.y+COR;
+            realDSO= __fsqrt_rd(DSO * DSO + SUV.y * SUV.y);
             
-            weight=__fdividef(DSO+realy*sinalpha-realx*cosalpha,DSO);
+            weight=__fdividef(realDSO+realy*sinalpha-realx*cosalpha,realDSO);
             
             weight=__frcp_rd(weight*weight);
             
@@ -340,7 +316,6 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
 {
     // printf("voxel_backprojection(geo.nDetector = %d, %d)\n", geo.nDetecU, geo.nDetecV);
     // printf("geo.nVoxel    = %d, %d, %d\n", geo.nVoxelX, geo.nVoxelY, geo.nVoxelZ);
-    
     // Prepare for MultiGPU
     int deviceCount = gpuids.GetLength();
     cudaCheckErrors("Device query fail");
@@ -419,7 +394,7 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
     Point3D* projParamsArrayHost;
     cudaMallocHost((void**)&projParamsArrayHost,6*PROJ_PER_KERNEL*sizeof(Point3D));
     float* projSinCosArrayHost;
-    cudaMallocHost((void**)&projSinCosArrayHost,5*PROJ_PER_KERNEL*sizeof(float));
+    cudaMallocHost((void**)&projSinCosArrayHost,6*PROJ_PER_KERNEL*sizeof(float));
     
     
     // Texture object variables
@@ -563,11 +538,12 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                             sinalpha=sin(geoArray[img_slice*deviceCount+dev].alpha);
                             cosalpha=cos(geoArray[img_slice*deviceCount+dev].alpha);
                             
-                            projSinCosArrayHost[5*j]=sinalpha;  // 2*j because we have 2 float (sin or cos angle) values per projection
-                            projSinCosArrayHost[5*j+1]=cosalpha;
-                            projSinCosArrayHost[5*j+2]=geo.COR[currProjNumber_global];
-                            projSinCosArrayHost[5*j+3]=geo.DSD[currProjNumber_global];
-                            projSinCosArrayHost[5*j+4]=geo.DSO[currProjNumber_global];
+                            projSinCosArrayHost[6*j]=sinalpha;  // 2*j because we have 2 float (sin or cos angle) values per projection
+                            projSinCosArrayHost[6*j+1]=cosalpha;
+                            projSinCosArrayHost[6*j+2]=geo.COR[currProjNumber_global];
+                            projSinCosArrayHost[6*j+3]=geo.DSD[currProjNumber_global];
+                            projSinCosArrayHost[6*j+4]=geo.DSO[currProjNumber_global];
+                            projSinCosArrayHost[6 * j + 5] = geo.EPS;
                             
                             computeDeltasCube(geoArray[img_slice*deviceCount+dev],currProjNumber_global,&xyzOrigin,&deltaX,&deltaY,&deltaZ,&source);
                             
@@ -584,7 +560,7 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                         }   // END for (preparing params for kernel call)
                         
                         // Copy the prepared parameter arrays to constant memory to make it available for the kernel
-                        cudaMemcpyToSymbolAsync(projSinCosArrayDev, projSinCosArrayHost, sizeof(float)*5*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
+                        cudaMemcpyToSymbolAsync(projSinCosArrayDev, projSinCosArrayHost, sizeof(float)*6*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
                         cudaMemcpyToSymbolAsync(projParamsArrayDev, projParamsArrayHost, sizeof(Point3D)*6*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
                         cudaStreamSynchronize(stream[dev*nStreamDevice]);
                         
@@ -705,7 +681,6 @@ void splitCTbackprojection(const GpuIds& gpuids, Geometry geo,int nalpha, unsign
         
         
         *split_projections=(mem_proj*PROJ_PER_KERNEL*2+mem_free-1)/mem_free;
-        
     }
 }
 

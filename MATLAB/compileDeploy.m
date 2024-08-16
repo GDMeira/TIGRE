@@ -1,0 +1,2 @@
+cd('TIGRE\MATLAB');
+Compile();

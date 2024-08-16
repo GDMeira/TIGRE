@@ -96,7 +96,7 @@ do { \
     
     void CreateTexture(const GpuIds& gpuids,const float* imagedata,Geometry geo,cudaArray** d_cuArrTex, cudaTextureObject_t *texImage,bool alloc);
 
-__constant__ Point3D projParamsArrayDev[4*PROJ_PER_BLOCK];  // Dev means it is on device
+__constant__ Point3D projParamsArrayDev[5*PROJ_PER_BLOCK];  // Dev means it is on device
 
 
 __global__ void vecAddInPlace(float *a, float *b, unsigned long  n)
@@ -132,14 +132,11 @@ __global__ void kernelPixelDetector( Geometry geo,
     if(indAlpha>=totalNoOfProjections)
         return;
     
-    Point3D uvOrigin = projParamsArrayDev[4*projNumber];  // 6*projNumber because we have 6 Point3D values per projection
-    Point3D deltaU = projParamsArrayDev[4*projNumber+1];
-    Point3D deltaV = projParamsArrayDev[4*projNumber+2];
-    Point3D source = projParamsArrayDev[4*projNumber+3];
-
-    // changing source for each u, v
-    source.z+= v * geo.EPS * geo.DSD[projNumber] / (geo.DSD[projNumber]-geo.DSO[projNumber]) / geo.dVoxelZ;
-    source.y+= u * geo.EPS * geo.DSD[projNumber] / (geo.DSD[projNumber]-geo.DSO[projNumber]) / geo.dVoxelY;
+    Point3D uvOrigin = projParamsArrayDev[5 * projNumber];  // 6*projNumber because we have 6 Point3D values per projection
+    Point3D deltaU = projParamsArrayDev[5 * projNumber + 1];
+    Point3D deltaV = projParamsArrayDev[5 * projNumber + 2];
+    Point3D source = projParamsArrayDev[5 * projNumber + 3];
+    Point3D aux = projParamsArrayDev[5 * projNumber + 4];
 
     /////// Get coordinates XYZ of pixel UV
     unsigned long pixelV = geo.nDetecV-v-1;
@@ -148,15 +145,46 @@ __global__ void kernelPixelDetector( Geometry geo,
     pixel1D.x=(uvOrigin.x+pixelU*deltaU.x+pixelV*deltaV.x);
     pixel1D.y=(uvOrigin.y+pixelU*deltaU.y+pixelV*deltaV.y);
     pixel1D.z=(uvOrigin.z+pixelU*deltaU.z+pixelV*deltaV.z);
+
+    // changing source for each u, v
+    // o (0,0,0) est� no canto da imagem, uvorigem � o centro do detector nessa geometria
+    float DSD = aux.x;
+    float DSO = aux.y;
+    float EPS = aux.z;
+    float h = geo.dDetecU * (DSD - DSO) / (EPS - geo.dDetecU);
+    float fGrowth = EPS * (DSD + h) / (DSD - DSO + h);
+    // float fGrowth = __fdividef(DSD + h, h);
+
+    float pixelUd = pixelU - (float)(geo.nDetecU - 1) * 0.5f;
+    float pixelVd = pixelV - (float)(geo.nDetecV - 1) * 0.5f; 
+
+    //Point3D deltaUd, deltaVd;
+    //deltaUd.x = deltaU.x / geo.dDetecU * fGrowth;
+    //deltaUd.y = deltaU.y / geo.dDetecU * fGrowth;
+    //deltaUd.z = deltaU.z / geo.dDetecU * fGrowth;
+
+    //deltaVd.x = deltaV.x / geo.dDetecV * fGrowth;
+    //deltaVd.y = deltaV.y / geo.dDetecV * fGrowth;
+    //deltaVd.z = deltaV.z / geo.dDetecV * fGrowth;
+
+    //source.x += pixelUd * deltaUd.x + pixelVd * deltaVd.x;
+    //source.y += pixelUd * deltaUd.y + pixelVd * deltaVd.y;
+    //source.z += pixelUd * deltaUd.z + pixelVd * deltaVd.z;
+    Point3D newSource;
+
+    newSource.x = source.x + fGrowth * ( __fdividef(pixelUd * deltaU.x, geo.dDetecU) + __fdividef(pixelVd * deltaV.x, geo.dDetecV) );
+    newSource.y = source.y + fGrowth * ( __fdividef(pixelUd * deltaU.y, geo.dDetecU) + __fdividef(pixelVd * deltaV.y, geo.dDetecV) );
+    newSource.z = source.z + fGrowth * ( __fdividef(pixelUd * deltaU.z, geo.dDetecU) + __fdividef(pixelVd * deltaV.z, geo.dDetecV) );
+
     ///////
     // Siddon's ray-voxel intersection, optimized as in doi=10.1.1.55.7516
     //////
     // Also called Jacobs algorithms
     Point3D ray;
     // vector of Xray
-    ray.x=pixel1D.x-source.x;
-    ray.y=pixel1D.y-source.y;
-    ray.z=pixel1D.z-source.z;
+    ray.x=pixel1D.x- newSource.x;
+    ray.y=pixel1D.y-newSource.y;
+    ray.z=pixel1D.z-newSource.z;
     float eps=0.001;
     ray.x=(fabsf(ray.x)<eps)? 0 : ray.x;
     ray.y=(fabsf(ray.y)<eps)? 0 : ray.y; 
@@ -169,12 +197,12 @@ __global__ void kernelPixelDetector( Geometry geo,
     float axM,ayM,azM;
     // In the paper Nx= number of X planes-> Nvoxel+1
    
-    axm=fminf(__fdividef(-source.x,ray.x),__fdividef(geo.nVoxelX-source.x,ray.x));
-    aym=fminf(__fdividef(-source.y,ray.y),__fdividef(geo.nVoxelY-source.y,ray.y));
-    azm=fminf(__fdividef(-source.z,ray.z),__fdividef(geo.nVoxelZ-source.z,ray.z));
-    axM=fmaxf(__fdividef(-source.x,ray.x),__fdividef(geo.nVoxelX-source.x,ray.x));
-    ayM=fmaxf(__fdividef(-source.y,ray.y),__fdividef(geo.nVoxelY-source.y,ray.y));
-    azM=fmaxf(__fdividef(-source.z,ray.z),__fdividef(geo.nVoxelZ-source.z,ray.z));
+    axm=fminf(__fdividef(-newSource.x,ray.x),__fdividef(geo.nVoxelX-newSource.x,ray.x));
+    aym=fminf(__fdividef(-newSource.y,ray.y),__fdividef(geo.nVoxelY-newSource.y,ray.y));
+    azm=fminf(__fdividef(-newSource.z,ray.z),__fdividef(geo.nVoxelZ-newSource.z,ray.z));
+    axM=fmaxf(__fdividef(-newSource.x,ray.x),__fdividef(geo.nVoxelX-newSource.x,ray.x));
+    ayM=fmaxf(__fdividef(-newSource.y,ray.y),__fdividef(geo.nVoxelY-newSource.y,ray.y));
+    azM=fmaxf(__fdividef(-newSource.z,ray.z),__fdividef(geo.nVoxelZ-newSource.z,ray.z));
     
     float am=fmaxf(fmaxf(axm,aym),azm);
     float aM=fminf(fminf(axM,ayM),azM);
@@ -187,35 +215,35 @@ __global__ void kernelPixelDetector( Geometry geo,
     // Discussion about ternary operator in CUDA: https://stackoverflow.com/questions/7104384/in-cuda-why-is-a-b010-more-efficient-than-an-if-else-version
     float imin,imax,jmin,jmax,kmin,kmax;
     // for X
-    if( source.x<pixel1D.x){
-        imin=(am==axm)? 1.0f             : ceilf (source.x+am*ray.x);
-        imax=(aM==axM)? geo.nVoxelX      : floorf(source.x+aM*ray.x);
+    if( newSource.x<pixel1D.x){
+        imin=(am==axm)? 1.0f             : ceilf (newSource.x+am*ray.x);
+        imax=(aM==axM)? geo.nVoxelX      : floorf(newSource.x+aM*ray.x);
     }else{
-        imax=(am==axm)? geo.nVoxelX-1.0f : floorf(source.x+am*ray.x);
-        imin=(aM==axM)? 0.0f             : ceilf (source.x+aM*ray.x);
+        imax=(am==axm)? geo.nVoxelX-1.0f : floorf(newSource.x+am*ray.x);
+        imin=(aM==axM)? 0.0f             : ceilf (newSource.x+aM*ray.x);
     }
     // for Y
-    if( source.y<pixel1D.y){
-        jmin=(am==aym)? 1.0f             : ceilf (source.y+am*ray.y);
-        jmax=(aM==ayM)? geo.nVoxelY      : floorf(source.y+aM*ray.y);
+    if( newSource.y<pixel1D.y){
+        jmin=(am==aym)? 1.0f             : ceilf (newSource.y+am*ray.y);
+        jmax=(aM==ayM)? geo.nVoxelY      : floorf(newSource.y+aM*ray.y);
     }else{
-        jmax=(am==aym)? geo.nVoxelY-1.0f : floorf(source.y+am*ray.y);
-        jmin=(aM==ayM)? 0.0f             : ceilf (source.y+aM*ray.y);
+        jmax=(am==aym)? geo.nVoxelY-1.0f : floorf(newSource.y+am*ray.y);
+        jmin=(aM==ayM)? 0.0f             : ceilf (newSource.y+aM*ray.y);
     }
     // for Z
-    if( source.z<pixel1D.z){
-        kmin=(am==azm)? 1.0f             : ceilf (source.z+am*ray.z);
-        kmax=(aM==azM)? geo.nVoxelZ      : floorf(source.z+aM*ray.z);
+    if( newSource.z<pixel1D.z){
+        kmin=(am==azm)? 1.0f             : ceilf (newSource.z+am*ray.z);
+        kmax=(aM==azM)? geo.nVoxelZ      : floorf(newSource.z+aM*ray.z);
     }else{
-        kmax=(am==azm)? geo.nVoxelZ-1.0f : floorf(source.z+am*ray.z);
-        kmin=(aM==azM)? 0.0f             : ceilf (source.z+aM*ray.z);
+        kmax=(am==azm)? geo.nVoxelZ-1.0f : floorf(newSource.z+am*ray.z);
+        kmin=(aM==azM)? 0.0f             : ceilf (newSource.z+aM*ray.z);
     }
     
     // get intersection point N1. eq(20-21) [(also eq 9-10)]
     float ax,ay,az;
-    ax=(source.x<pixel1D.x)?  __fdividef(imin-source.x,ray.x) :  __fdividef(imax-source.x,ray.x);
-    ay=(source.y<pixel1D.y)?  __fdividef(jmin-source.y,ray.y) :  __fdividef(jmax-source.y,ray.y);
-    az=(source.z<pixel1D.z)?  __fdividef(kmin-source.z,ray.z) :  __fdividef(kmax-source.z,ray.z);
+    ax=(newSource.x<pixel1D.x)?  __fdividef(imin-newSource.x,ray.x) :  __fdividef(imax-newSource.x,ray.x);
+    ay=(newSource.y<pixel1D.y)?  __fdividef(jmin-newSource.y,ray.y) :  __fdividef(jmax-newSource.y,ray.y);
+    az=(newSource.z<pixel1D.z)?  __fdividef(kmin-newSource.z,ray.z) :  __fdividef(kmax-newSource.z,ray.z);
     
     // If its Infinite (i.e. ray is parallel to axis), make sure its positive
     ax=(isinf(ax))? abs(ax) : ax;
@@ -226,9 +254,9 @@ __global__ void kernelPixelDetector( Geometry geo,
     // get index of first intersection. eq (26) and (19)
     unsigned long i,j,k;
     float aminc=fminf(fminf(ax,ay),az);
-    i=(unsigned long)floorf(source.x+ (aminc+am)*0.5f*ray.x);
-    j=(unsigned long)floorf(source.y+ (aminc+am)*0.5f*ray.y);
-    k=(unsigned long)floorf(source.z+ (aminc+am)*0.5f*ray.z);
+    i=(unsigned long)floorf(newSource.x+ (aminc+am)*0.5f*ray.x);
+    j=(unsigned long)floorf(newSource.y+ (aminc+am)*0.5f*ray.y);
+    k=(unsigned long)floorf(newSource.z+ (aminc+am)*0.5f*ray.z);
     // Initialize
     float ac=am;
     //eq (28), unit anlges
@@ -238,9 +266,9 @@ __global__ void kernelPixelDetector( Geometry geo,
     azu=__frcp_rd(fabsf(ray.z));
     // eq(29), direction of update
     float iu,ju,ku;
-    iu=(source.x< pixel1D.x)? 1.0f : -1.0f;
-    ju=(source.y< pixel1D.y)? 1.0f : -1.0f;
-    ku=(source.z< pixel1D.z)? 1.0f : -1.0f;
+    iu=(newSource.x< pixel1D.x)? 1.0f : -1.0f;
+    ju=(newSource.y< pixel1D.y)? 1.0f : -1.0f;
+    ku=(newSource.z< pixel1D.z)? 1.0f : -1.0f;
     
     float maxlength=__fsqrt_rd(ray.x*ray.x*geo.dVoxelX*geo.dVoxelX+ray.y*ray.y*geo.dVoxelY*geo.dVoxelY+ray.z*ray.z*geo.dVoxelZ*geo.dVoxelZ);
     float sum=0.0f;
@@ -249,6 +277,7 @@ __global__ void kernelPixelDetector( Geometry geo,
     i+=0.5f;
     j+=0.5f;
     k+=0.5f;
+
     for (unsigned long ii=0;ii<Np;ii++){
         if (ax==aminc){
             sum+=(ax-ac)*tex3D<float>(tex, i, j, k);
@@ -298,6 +327,7 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
     
     // Does everything fit in the GPUs?
     const bool fits_in_memory = mem_image+2*PROJ_PER_BLOCK*mem_proj<mem_GPU_global;
+    const char* boolStr = fits_in_memory ? "true" : "false";
     unsigned int splits=1;
     if (!fits_in_memory) {
         // Nope nope.
@@ -358,7 +388,7 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
     // auxiliary variables
     Point3D source, deltaU, deltaV, uvOrigin;
     Point3D* projParamsArrayHost;
-    cudaMallocHost((void**)&projParamsArrayHost,4*PROJ_PER_BLOCK*sizeof(Point3D));
+    cudaMallocHost((void**)&projParamsArrayHost, 5 * PROJ_PER_BLOCK * sizeof(Point3D));
     cudaCheckErrors("Error allocating auxiliary constant memory");
     
     // Create Streams for overlapping memcopy and compute
@@ -408,7 +438,8 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
         unsigned int proj_global;
         // Now that we have prepared the image (piece of image) and parameters for kernels
         // we project for all angles.
-        for (unsigned int i=0; i<noOfKernelCalls; i++) { // Iterating over all 720 projs
+
+        for (unsigned int i=0; i<noOfKernelCalls; i++) { // Iterating over all 720 projs / PROJ_PER_BLOCK
             for (dev=0;dev<deviceCount;dev++){
                 cudaSetDevice(gpuids[dev]);
                 
@@ -421,24 +452,26 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
                     geoArray[sp].alpha=angles[proj_global*3];
                     geoArray[sp].theta=angles[proj_global*3+1];
                     geoArray[sp].psi  =angles[proj_global*3+2];
-                    
-                    
+                    Point3D aux;
+                    aux.x = geoArray[sp].DSD[proj_global];
+                    aux.y = geoArray[sp].DSO[proj_global];
+                    aux.z = geoArray[sp].EPS;
+
                     //precomute distances for faster execution
                     //Precompute per angle constant stuff for speed
-                    computeDeltas_Siddon(geoArray[sp],proj_global, &uvOrigin, &deltaU, &deltaV, &source);
+                    computeDeltas_Siddon(geoArray[sp], proj_global, &uvOrigin, &deltaU, &deltaV, &source);
                     //Ray tracing!
-                    projParamsArrayHost[4*j]=uvOrigin;		// 6*j because we have 6 Point3D values per projection
-                    projParamsArrayHost[4*j+1]=deltaU;
-                    projParamsArrayHost[4*j+2]=deltaV;
-                    projParamsArrayHost[4*j+3]=source;
-                    
+                    projParamsArrayHost[5 * j] = uvOrigin;		// 6*j because we have 6 Point3D values per projection
+                    projParamsArrayHost[5 * j + 1] = deltaU;
+                    projParamsArrayHost[5 * j + 2] = deltaV;
+                    projParamsArrayHost[5 * j + 3] = source;
+                    projParamsArrayHost[5 * j + 4] = aux;
                 }
-                cudaMemcpyToSymbolAsync(projParamsArrayDev, projParamsArrayHost, sizeof(Point3D)*4*PROJ_PER_BLOCK,0,cudaMemcpyHostToDevice,stream[dev*2]);
+                cudaMemcpyToSymbolAsync(projParamsArrayDev, projParamsArrayHost, sizeof(Point3D)*5*PROJ_PER_BLOCK,0,cudaMemcpyHostToDevice,stream[dev*2]);
                 cudaStreamSynchronize(stream[dev*2]);
                 cudaCheckErrors("kernel fail");
                 kernelPixelDetector<<<grid,block,0,stream[dev*2]>>>(geoArray[sp],dProjection[(i%2)+dev*2],i,nangles_device,texImg[dev]);
             }
-
 
             // Now that the computation is happening, we need to either prepare the memory for
             // combining of the projections (splits>1) and start removing previous results.
@@ -524,7 +557,6 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
             }
         }
         
-        
          // We still have the last set of projections to get out of GPUs
         for (dev = 0; dev < deviceCount; dev++)
         {
@@ -543,11 +575,13 @@ int siddon_ray_projection(float* img, Geometry geo, float** result,float const *
         }
         // Make sure everyone has done their bussiness before the next image split:
         cudaDeviceSynchronize();
+
     } // End image split loop.
     
     cudaCheckErrors("Main loop  fail");
     ///////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////
+
     for (dev = 0; dev < deviceCount; dev++){
             cudaSetDevice(gpuids[dev]);
             cudaDestroyTextureObject(texImg[dev]);
@@ -682,7 +716,7 @@ void computeDeltas_Siddon(Geometry geo,int i, Point3D* uvorigin, Point3D* deltaU
     Pu0.x=-(geo.DSD[i]-geo.DSO[i]);   Pu0.y= geo.dDetecU*(1-((float)geo.nDetecU/2)+0.5);       Pu0.z= geo.dDetecV*(((float)geo.nDetecV/2)-0.5-0);
     Pv0.x=-(geo.DSD[i]-geo.DSO[i]);   Pv0.y= geo.dDetecU*(0-((float)geo.nDetecU/2)+0.5);       Pv0.z= geo.dDetecV*(((float)geo.nDetecV/2)-0.5-1);
     // Geomtric trasnformations:
-    // Now we have the Real world (OXYZ) coordinates of the bottom corner and its two neighbours.
+    // Now we have the Real world (OXYZ) coordinates of the UPPER LEFT corner and its two neighbours.
     // The obkjective is to get a position of the detector in a coordinate system where:
     // 1-units are voxel size (in each direction can be different)
     // 2-The image has the its first voxel at (0,0,0)

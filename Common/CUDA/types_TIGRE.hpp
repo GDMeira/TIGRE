@@ -58,6 +58,7 @@ struct  Geometry {
     float dVoxelX, dVoxelY, dVoxelZ;
     float *offOrigX,*offOrigY,*offOrigZ;
     float* DSO;
+    float EPS;
     // Parameters  of the Detector.
     int   nDetecU, nDetecV;
     float sDetecU, sDetecV;
