@@ -247,149 +247,175 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
             bool rayGotPrisioned = false;
             bool hasFoundBestPixel = false;
+
+            Point3D H; 
+            H.x = -DSD + DSO - h;
+            H.y = S.y;
+            H.z = S.z;
+
+            // This is the vector defining the line from the source to the Voxel
+            float vectX,vectY,vectZ;
+            vectX=(P.x -H.x);
+            vectY=(P.y -H.y);
+            vectZ=(P.z -H.z);
+            
+            // Get the coordinates in the detector UV where the mid point of the voxel is projected without considering refraction.
+            float t=__fdividef(h, vectX);
+            float y,z;
+            y=vectY*t+H.y;
+            z=vectZ*t+H.z;
+            float u,v;
+            u=y+(float)geo.nDetecU*0.5f;
+            v=z+(float)geo.nDetecV*0.5f;
             
             // Q is the point where ray intersects the gel tube for the first time
             // v2 is the ray direction after refraction (enter the tube)
             Point3D Q, v2;
 
-            if (lastGoodY > 0) {
-                #pragma unroll
-                for (int v = lastGoodZ-2; v < lastGoodZ+3; v++){
-                    if (hasFoundBestPixel) break;
-                    #pragma unroll
-                    for (int u = lastGoodY-2; u < lastGoodY+3; u++){
-                        // source position scaled
-                        Point3D Suv;
-                        Suv.x = S.x;
-                        // Suv.y = S.y + (u - (float)(geo.nDetecU - 1) * 0.5f) * __fdividef(DSD + h, h);
-                        // Suv.z = S.z + (v - (float)(geo.nDetecV - 1) * 0.5f) * __fdividef(DSD + h, h);
-                        Suv.y = S.y + (u - (float)(geo.nDetecU - 1) * 0.5f) * EPS * __fdividef(DSD + h, DSD - DSO + h);
-                        Suv.z = S.z + (v - (float)(geo.nDetecV - 1) * 0.5f) * EPS * __fdividef(DSD + h, DSD - DSO + h);
+            // if (lastGoodY > 0) {
+            //     #pragma unroll
+            //     for (int v = lastGoodZ-2; v < lastGoodZ+3; v++){
+            //         if (hasFoundBestPixel) break;
+            //         #pragma unroll
+            //         for (int u = lastGoodY-2; u < lastGoodY+3; u++){
+            //             // source position scaled
+            //             Point3D Suv;
+            //             Suv.x = S.x;
+            //             // Suv.y = S.y + (u - (float)(geo.nDetecU - 1) * 0.5f) * __fdividef(DSD + h, h);
+            //             // Suv.z = S.z + (v - (float)(geo.nDetecV - 1) * 0.5f) * __fdividef(DSD + h, h);
+            //             Suv.y = S.y + (u - (float)(geo.nDetecU - 1) * 0.5f) * EPS * __fdividef(DSD + h, DSD - DSO + h);
+            //             Suv.z = S.z + (v - (float)(geo.nDetecV - 1) * 0.5f) * EPS * __fdividef(DSD + h, DSD - DSO + h);
 
-                        // detector position scaled
-                        Point3D detector;
-                        detector.x = -DSD + DSO; //x axis point to source
-                        detector.y = S.y + u - (float)(geo.nDetecU - 1) * 0.5f;
-                        detector.z = S.z + v - (float)(geo.nDetecV - 1) * 0.5f;
+            //             // detector position scaled
+            //             Point3D detector;
+            //             detector.x = -DSD + DSO; //x axis point to source
+            //             detector.y = S.y + u - (float)(geo.nDetecU - 1) * 0.5f;
+            //             detector.z = S.z + v - (float)(geo.nDetecV - 1) * 0.5f;
 
-                        // vector from source to detector
-                        Point3D ray;
-                        ray.x = detector.x - Suv.x;
-                        ray.y = detector.y - Suv.y;
-                        ray.z = detector.z - Suv.z;
+            //             // vector from source to detector
+            //             Point3D ray;
+            //             ray.x = detector.x - Suv.x;
+            //             ray.y = detector.y - Suv.y;
+            //             ray.z = detector.z - Suv.z;
 
-                        // scaling to resolve the problem with a circle
-                        Point3D Saux, rayAux;
-                        Saux.x = Suv.x / geo.dDetecU;
-                        rayAux.x = ray.x / geo.dDetecU;
-                        float rayAuxLength = __fsqrt_rd(rayAux.x*rayAux.x + rayAux.y*rayAux.y + rayAux.z*rayAux.z);
-                        rayAux.x = rayAux.x / rayAuxLength;
-                        rayAux.y = rayAux.y / rayAuxLength;
-                        rayAux.z = rayAux.z / rayAuxLength;
+            //             // scaling to resolve the problem with a circle
+            //             Point3D Saux, rayAux;
+            //             Saux = Suv;
+            //             rayAux = ray;
+            //             Saux.x = Suv.x / geo.dDetecU;
+            //             rayAux.x = ray.x / geo.dDetecU;
+            //             float rayAuxLength = __fsqrt_rd(rayAux.x*rayAux.x + rayAux.y*rayAux.y + rayAux.z*rayAux.z);
+            //             rayAux.x = rayAux.x / rayAuxLength;
+            //             rayAux.y = rayAux.y / rayAuxLength;
+            //             rayAux.z = rayAux.z / rayAuxLength;
 
-                        float aux1 = 2 * Saux.x * rayAux.x + 2 * Saux.y * rayAux.y;
-                        float aux2 = rayAux.x * rayAux.x + rayAux.y * rayAux.y + rayAux.z * rayAux.z;
-                        float aux3 = (-gelTubeRadius * gelTubeRadius + Saux.x * Saux.x + Saux.y * Saux.y);
+            //             float aux1 = 2 * Saux.x * rayAux.x + 2 * Saux.y * rayAux.y;
+            //             float aux2 = rayAux.x * rayAux.x + rayAux.y * rayAux.y + rayAux.z * rayAux.z;
+            //             float aux3 = (-gelTubeRadius * gelTubeRadius + Saux.x * Saux.x + Saux.y * Saux.y);
 
-                        // no real solutions or only 1 solution
-                        if (aux1*aux1 - 4 * aux2 * aux3 <= 0) continue;
+            //             // no real solutions or only 1 solution
+            //             if (aux1*aux1 - 4 * aux2 * aux3 <= 0) continue;
 
-                        float a1 = (-__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
-                        float a2 = (__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
-                        float a = a1 > 0 ? a1 : a2;
+            //             float a1 = (-__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
+            //             float a2 = (__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
+            //             float a = a1 > 0 ? a1 : a2;
 
-                        // point where ray intersects the gel tube 1 time
-                        Q.x = Saux.x + a * rayAux.x;
-                        Q.y = Saux.y + a * rayAux.y;
-                        Q.z = Saux.z + a * rayAux.z;
+            //             // point where ray intersects the gel tube 1 time
+            //             Q.x = Saux.x + a * rayAux.x;
+            //             Q.y = Saux.y + a * rayAux.y;
+            //             Q.z = Saux.z + a * rayAux.z;
 
-                        // scaling to the current geometry
-                        Q.x = Q.x * geo.dDetecU;
+            //             // scaling to the current geometry
+            //             Q.x = Q.x * geo.dDetecU;
 
-                        // refraction
-                        Point3D v1, n, N;
+            //             // refraction
+            //             Point3D v1, n, N;
 
-                        // incident ray versor
-                        float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
-                        v1.x = ray.x / rayLength;
-                        v1.y = ray.y / rayLength;
-                        v1.z = ray.z / rayLength;
+            //             // incident ray versor
+            //             float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
+            //             v1.x = ray.x / rayLength;
+            //             v1.y = ray.y / rayLength;
+            //             v1.z = ray.z / rayLength;
 
-                        // n = (Q - C) / ||Q - C|| normal vector to tube surface, C = (0, 0, Q.z) tube center
-                        float nLength = __fsqrt_rd(Q.x*Q.x + Q.y*Q.y);
-                        n.x = Q.x / nLength;
-                        n.y = Q.y / nLength;
-                        n.z = 0;
+            //             // n = (Q - C) / ||Q - C|| normal vector to tube surface, C = (0, 0, Q.z) tube center
+            //             float nLength = __fsqrt_rd(Q.x*Q.x + Q.y*Q.y);
+            //             n.x = Q.x / nLength;
+            //             n.y = Q.y / nLength;
+            //             n.z = 0;
 
-                        float incidenceAngle = acos(v1.x*n.x + v1.y*n.y + v1.z*n.z);
-                        incidenceAngle = (incidenceAngle > PI_2) ? PI_1 - incidenceAngle : incidenceAngle;
-                        float refractionAngle = asin(nWater * sin(incidenceAngle) / nGel);
-                        if (refractionAngle > PI_4) {
-                            rayGotPrisioned = true;
-                            continue;
-                        }
+            //             float incidenceAngle = acos(v1.x*n.x + v1.y*n.y + v1.z*n.z);
+            //             incidenceAngle = (incidenceAngle > PI_2) ? PI_1 - incidenceAngle : incidenceAngle;
+            //             float refractionAngle = asin(nWater * sin(incidenceAngle) / nGel);
+            //             if (refractionAngle > PI_4) {
+            //                 rayGotPrisioned = true;
+            //                 continue;
+            //             }
 
-                        // N = n x v1 normal to the plane formed by n and v1 and v2
-                        N.x = -n.y * v1.z;
-                        N.y = n.x * v1.z;
-                        N.z = v1.x * n.y - v1.y * n.x;
+            //             // N = n x v1 normal to the plane formed by n and v1 and v2
+            //             N.x = -n.y * v1.z;
+            //             N.y = n.x * v1.z;
+            //             N.z = v1.x * n.y - v1.y * n.x;
 
-                        // // v2 is the refracted ray
-                        float cos_r = cosf(refractionAngle);
-                        float cos_ri = cosf(abs(refractionAngle - incidenceAngle));         
-                        aux1 = v1.x*n.y*N.z - v1.y*n.x*N.z + v1.z * (n.x*N.y -n.y*N.x);
+            //             // // v2 is the refracted ray
+            //             float cos_r = cosf(refractionAngle);
+            //             float cos_ri = cosf(abs(refractionAngle - incidenceAngle));         
+            //             aux1 = v1.x*n.y*N.z - v1.y*n.x*N.z + v1.z * (n.x*N.y -n.y*N.x);
 
-                        v2.x = (cos_ri * n.y*N.z - cos_r * (v1.z*N.y - v1.y*N.z)) / aux1;
-                        v2.y = (cos_ri * (-n.x*N.z) - cos_r * (v1.x*N.z - v1.z*N.x)) / aux1;
-                        v2.z = (cos_ri * (n.x*N.y - n.y*N.x) - cos_r * (v1.y*N.x - v1.x*N.y)) / aux1;
+            //             v2.x = (cos_ri * n.y*N.z - cos_r * (v1.z*N.y - v1.y*N.z)) / aux1;
+            //             v2.y = (cos_ri * (-n.x*N.z) - cos_r * (v1.x*N.z - v1.z*N.x)) / aux1;
+            //             v2.z = (cos_ri * (n.x*N.y - n.y*N.x) - cos_r * (v1.y*N.x - v1.x*N.y)) / aux1;
 
-                        // normalize v2
-                        float v2Length = __fsqrt_rd(v2.x*v2.x + v2.y*v2.y + v2.z*v2.z);
-                        v2.x = v2.x / v2Length;
-                        v2.y = v2.y / v2Length;
-                        v2.z = v2.z / v2Length;
-                        // end refraction
+            //             // normalize v2
+            //             float v2Length = __fsqrt_rd(v2.x*v2.x + v2.y*v2.y + v2.z*v2.z);
+            //             v2.x = v2.x / v2Length;
+            //             v2.y = v2.y / v2Length;
+            //             v2.z = v2.z / v2Length;
+            //             // end refraction
 
-                        if (rayGotPrisioned) {
-                            rayGotPrisioned = false;
-                            lastGoodY = 0;
-                            lastGoodZ = 0;
-                            continue;
-                        }
+            //             if (rayGotPrisioned) {
+            //                 rayGotPrisioned = false;
+            //                 lastGoodY = 0;
+            //                 lastGoodZ = 0;
+            //                 continue;
+            //             }
 
-                        float t = Q.x - P.x;
+            //             float t = Q.x - P.x;
 
-                        // point where ray intercepts the yz plan that contains P
-                        Point3D U;
-                        U.y = P.y + t * v2.y;
-                        U.z = P.z + t * v2.z;
+            //             // point where ray intercepts the yz plan that contains P
+            //             Point3D U;
+            //             U.y = P.y + t * v2.y;
+            //             U.z = P.z + t * v2.z;
 
-                        float distanceFromPtoU = __fsqrt_rd((P.y - U.y) * (P.y - U.y) + (P.z - U.z) * (P.z - U.z))*geo.dDetecU;
+            //             float distanceFromPtoU = __fsqrt_rd((P.y - U.y) * (P.y - U.y) + (P.z - U.z) * (P.z - U.z))*geo.dDetecU;
 
-                        if (distanceFromPtoU < geo.dVoxelX) {
-                            lastGoodY = u;
-                            lastGoodZ = v;
-                            hasFoundBestPixel = true;
-                            break;
-                        }
-                    }
-                }
-            }
+            //             if (distanceFromPtoU < geo.dVoxelX) {
+            //                 lastGoodY = u;
+            //                 lastGoodZ = v;
+            //                 hasFoundBestPixel = true;
+            //                 break;
+            //             }
+            //         }
+            //     }
+            // }
 
-            int initialU = floorf((geo.nDetecU - 1)/2 - gelTubeRadius * geo.dDetecU / EPS);
-            int lastU = ceilf((geo.nDetecU - 1) / 2 + gelTubeRadius * geo.dDetecU / EPS);
+            // int initialU = floorf((geo.nDetecU - 1)/2 - gelTubeRadius * geo.dDetecU / EPS);
+            // int lastU = ceilf((geo.nDetecU - 1) / 2 + gelTubeRadius * geo.dDetecU / EPS);
 
-            int pixels = 5;
+            // int pixels = 5;
 
-            // indZ começa em 0 e vai até geo.nVoxelZ-1
-            int initialV = indZ-pixels < 0 ? 0 : indZ-pixels;
-            int lastV = indZ + pixels > geo.nVoxelZ-1 ? geo.nVoxelZ-1 : indZ + pixels;
+            // // indZ começa em 0 e vai até geo.nVoxelZ-1
+            // int initialV = indZ-pixels < 0 ? 0 : indZ-pixels;
+            // int lastV = indZ + pixels > geo.nVoxelZ-1 ? geo.nVoxelZ-1 : indZ + pixels;
 
-#pragma unroll
-            for (int v = initialV; v <= lastV; v++){
-                if (hasFoundBestPixel) break;
-#pragma unroll
-                for (int u = initialU; u < lastU; u++){
+// #pragma unroll
+//             for (int v = initialV; v <= lastV; v++){
+//                 if (hasFoundBestPixel) break;
+// #pragma unroll
+//                 for (int u = initialU; u < lastU; u++){
+                if (true){
+                    voxelColumn[colIdx]= P.y;
+            continue;
+
                     // source position scaled
                     Point3D Suv;
                     Suv.x = S.x;
@@ -412,6 +438,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
                     // scaling to resolve the problem with a circle
                     Point3D Saux, rayAux;
+                    Saux = Suv;
+                    rayAux = ray;
                     Saux.x = Suv.x / geo.dDetecU;
                     rayAux.x = ray.x / geo.dDetecU;
                     float rayAuxLength = __fsqrt_rd(rayAux.x*rayAux.x + rayAux.y*rayAux.y + rayAux.z*rayAux.z);
@@ -437,6 +465,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
                     // scaling to the current geometry
                     Q.x = Q.x * geo.dDetecU;
+                    voxelColumn[colIdx]= Q.x;
+            continue;
 
                     // refraction
                     Point3D v1, n, N;
@@ -497,6 +527,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
                     U.z = P.z + t * v2.z;
 
                     float distanceFromPtoU = __fsqrt_rd((P.y - U.y) * (P.y - U.y) + (P.z - U.z) * (P.z - U.z))*geo.dDetecU;
+                    voxelColumn[colIdx]= distanceFromPtoU;
+            continue;
 
                     if (distanceFromPtoU < geo.dVoxelX) {
                         lastGoodY = u;
@@ -505,7 +537,7 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
                         break;
                     }
                 }
-            }
+            // }
 
             if (!hasFoundBestPixel) {
                 lastGoodY = 0;
@@ -515,6 +547,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
             // scaling to resolve the problem with a circle
             Point3D Qaux, v2aux;
+            Qaux = Q;
+            v2aux = v2;
             Qaux.x = Q.x / geo.dDetecU;
             v2aux.x = v2.x / geo.dDetecU;
             float v2auxLength = __fsqrt_rd(v2aux.x*v2aux.x + v2aux.y*v2aux.y + v2aux.z*v2aux.z);
@@ -589,11 +623,11 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
             // point in the detector plan where the ray intersects
             Point3D Duv;
             Duv.x = -DSD + DSO; //x axis point to source
-            float t = Duv.x - Q.x;
+            t = Duv.x - Q.x;
             Duv.y = Q.y + t * v2.y;
             Duv.z = Q.z + t * v2.z;
 
-            float u,v;
+            u,v;
             u=Duv.y+(float)geo.nDetecU*0.5f;
             v=Duv.z+(float)geo.nDetecV*0.5f;
 
@@ -664,7 +698,6 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
 
 int voxel_backprojection(float  *  projections, Geometry geo, float* result,float const * const alphas, int nalpha, const GpuIds& gpuids)
 {
-    printf("voxel_backprojection(geo.nDetector = %d, %d)\n", geo.nDetecU, geo.nDetecV);
     // printf("geo.nVoxel    = %d, %d, %d\n", geo.nVoxelX, geo.nVoxelY, geo.nVoxelZ);
     // Prepare for MultiGPU
     int deviceCount = gpuids.GetLength();
@@ -685,8 +718,7 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
     // Split the CT problem
     unsigned int split_image;
     unsigned int split_projections;
-    splitCTbackprojection(gpuids,geo,nalpha,&split_image,&split_projections);
-    
+    splitCTbackprojection(gpuids,geo,nalpha,&split_image,&split_projections);    
     
     cudaCheckErrors("Error");
     //Pagelock memory for synchronous copy.
@@ -862,6 +894,8 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                     // kernel calls we'll need altogether.
                     unsigned int noOfKernelCalls = (proj_split_size[proj_block_split]+PROJ_PER_KERNEL-1)/PROJ_PER_KERNEL;  // We'll take care of bounds checking inside the loop if nalpha is not divisible by PROJ_PER_KERNEL
                     for (unsigned int i=0; i<noOfKernelCalls; i++){
+
+
                         
                         // Now we need to generate and copy all data for PROJ_PER_KERNEL projections to constant memory so that our kernel can use it
                         unsigned int j;
@@ -918,9 +952,10 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                         cudaMemcpyToSymbolAsync(projSinCosArrayDev, projSinCosArrayHost, sizeof(float)*9*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
                         cudaMemcpyToSymbolAsync(projParamsArrayDev, projParamsArrayHost, sizeof(Point3D)*6*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
                         cudaStreamSynchronize(stream[dev*nStreamDevice]);
-                        
+
                         kernelPixelBackprojectionFDK<<<blocks,threadsPerBlock,0,stream[dev*nStreamDevice]>>>(geoArray[img_slice*deviceCount+dev],dimage[dev],i,proj_split_size[proj_block_split],texProj[(proj_block_split%2)*deviceCount+dev]);
-                    }  // END for
+                    }
+                      // END for
                     //////////////////////////////////////////////////////////////////////////////////////
                     // END RB code, Main reconstruction loop: go through projections (rotation angles) and backproject
                     //////////////////////////////////////////////////////////////////////////////////////
