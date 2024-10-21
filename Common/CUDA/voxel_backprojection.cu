@@ -250,8 +250,8 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
             y=vectY*t+H.y;
             z=vectZ*t+H.z;
             float u,v;
-            u=y+(float)geo.nDetecU*0.5f;
-            v=z+(float)geo.nDetecV*0.5f;
+            u=y+(float)(geo.nDetecU - 1)*0.5f;
+            v=z+(float)(geo.nDetecV - 1)*0.5f;
 
             Point3D SUV; //in real geometry (no scale)
             SUV.x = S.x;
