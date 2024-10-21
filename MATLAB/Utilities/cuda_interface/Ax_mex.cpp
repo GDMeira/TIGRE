@@ -4,7 +4,7 @@
  * MATLAB MEX gateway for backprojection
  *
  * This file gets the data from MATLAB, checks it for errors and then
- * parses it to C and calls the relevant C/CUDA fucntions.
+ * parses it to C and calls the relevant C/CUDA functions.
  *
  * CODE by       Ander Biguri
  *

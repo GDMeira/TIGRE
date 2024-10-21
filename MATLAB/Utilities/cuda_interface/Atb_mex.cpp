@@ -16,26 +16,26 @@
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
  *
- * 1. Redistributions de código-fonte devem manter o aviso de direitos autorais acima,
- * esta lista de condições e a seguinte isenção de responsabilidade.
+ * 1. Redistributions de cï¿½digo-fonte devem manter o aviso de direitos autorais acima,
+ * esta lista de condiï¿½ï¿½es e a seguinte isenï¿½ï¿½o de responsabilidade.
  *
- * 2. Redistribuições em formato binário devem reproduzir o aviso de direitos autorais acima,
- * esta lista de condições e a seguinte isenção de responsabilidade na documentação
- * e/ou outros materiais fornecidos com a distribuição.
+ * 2. Redistribuiï¿½ï¿½es em formato binï¿½rio devem reproduzir o aviso de direitos autorais acima,
+ * esta lista de condiï¿½ï¿½es e a seguinte isenï¿½ï¿½o de responsabilidade na documentaï¿½ï¿½o
+ * e/ou outros materiais fornecidos com a distribuiï¿½ï¿½o.
  *
  * 3. Nem o nome do detentor dos direitos autorais nem os nomes de seus colaboradores
  * podem ser usados para endossar ou promover produtos derivados deste software sem
- * permissão prévia por escrito.
+ * permissï¿½o prï¿½via por escrito.
  *
- * ESTE SOFTWARE É FORNECIDO PELOS DETENTORES DOS DIREITOS AUTORAIS E COLABORADORES "COMO ESTÁ"
- * E QUALQUER GARANTIA EXPRESSA OU IMPLÍCITA, INCLUINDO, MAS NÃO SE LIMITANDO ÀS,
- * GARANTIAS IMPLÍCITAS DE COMERCIALIZAÇÃO E ADEQUAÇÃO A UM DETERMINADO PROPÓSITO
- * SÃO DECLINADAS. EM NENHUM EVENTO O DETENTOR DOS DIREITOS AUTORAIS OU COLABORADORES SERÃO
- * RESPONSÁVEIS POR QUALQUER DANO DIRETO, INDIRETO, INCIDENTAL, ESPECIAL, EXEMPLAR, OU
- * CONSEQUENCIAL (INCLUINDO, MAS NÃO SE LIMITANDO À, AQUISIÇÃO DE MERCADORIAS OU SERVIÇOS;
- * PERDA DE USO, DADOS, OU LUCROS; OU INTERRUPÇÃO DE NEGÓCIOS) NO ENTANTO CAUSADO
+ * ESTE SOFTWARE ï¿½ FORNECIDO PELOS DETENTORES DOS DIREITOS AUTORAIS E COLABORADORES "COMO ESTï¿½"
+ * E QUALQUER GARANTIA EXPRESSA OU IMPLï¿½CITA, INCLUINDO, MAS Nï¿½O SE LIMITANDO ï¿½S,
+ * GARANTIAS IMPLï¿½CITAS DE COMERCIALIZAï¿½ï¿½O E ADEQUAï¿½ï¿½O A UM DETERMINADO PROPï¿½SITO
+ * Sï¿½O DECLINADAS. EM NENHUM EVENTO O DETENTOR DOS DIREITOS AUTORAIS OU COLABORADORES SERï¿½O
+ * RESPONSï¿½VEIS POR QUALQUER DANO DIRETO, INDIRETO, INCIDENTAL, ESPECIAL, EXEMPLAR, OU
+ * CONSEQUENCIAL (INCLUINDO, MAS Nï¿½O SE LIMITANDO ï¿½, AQUISIï¿½ï¿½O DE MERCADORIAS OU SERVIï¿½OS;
+ * PERDA DE USO, DADOS, OU LUCROS; OU INTERRUPï¿½ï¿½O DE NEGï¿½CIOS) NO ENTANTO CAUSADO
  * E EM QUALQUER TEORIA DE RESPONSABILIDADE, SEJA EM CONTRATO, RESPONSABILIDADE ESTRITA,
- * OU DELITO (INCLUINDO NEGLIGÊNCIA OU OUTRO) DECORRENTE DE QUALQUER FORMA DO USO DESTE
+ * OU DELITO (INCLUINDO NEGLIGï¿½NCIA OU OUTRO) DECORRENTE DE QUALQUER FORMA DO USO DESTE
  * SOFTWARE, MESMO QUE AVISADO DA POSSIBILIDADE DE TAIS DANOS.
  * ---------------------------------------------------------------------------
  *

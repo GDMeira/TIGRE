@@ -15,7 +15,7 @@ class Arrow3D(matplotlib.patches.FancyArrowPatch):
         from mpl_toolkits.mplot3d import proj3d
 
         xs3d, ys3d, zs3d = self._verts3d
-        xs, ys, zs = proj3d.proj_transform(xs3d, ys3d, zs3d, renderer.M)
+        xs, ys, zs = proj3d.proj_transform(xs3d, ys3d, zs3d, self.axes.M)
         self.set_positions((xs[0], ys[0]), (xs[1], ys[1]))
         matplotlib.patches.FancyArrowPatch.draw(self, renderer)
 
@@ -33,7 +33,7 @@ TRANS_DEFAULT = np.array([0, 0, 0])
 
 def pathpatch_2d_to_3d_affine(pathpatch, mat_rot=ROT_DEFAULT, vec_trans=TRANS_DEFAULT):
     """
-    Transforms a 2D Patch to a 3D patch using the affine tranform
+    Transforms a 2D Patch to a 3D patch using the affine transform
     of the given rotation matrix and translation vector.
     The pathpatch is assumed to be on the plane Z = 0.
     """
