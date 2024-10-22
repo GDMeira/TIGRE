@@ -272,6 +272,36 @@ __global__ void kernelPixelDetector( Geometry geo,
                 iterationsAfterLastChange++;
             }
 
+            increment = a2/10;
+            lastRadiusSquare = (Q2.x- C.x)*(Q2.x- C.x) + (Q2.y- C.y)*(Q2.y- C.y);
+            iterationsAfterLastChange = 0;
+
+            for (int i = 0; i < 4000; i++) {
+                Q2.x = newSource.x + a2 * ray.x;
+                Q2.y = newSource.y + a2 * ray.y;
+                Q2.z = newSource.z + a2 * ray.z;
+
+                float currentRadiusSquare = (Q2.x- C.x)*(Q2.x- C.x) + (Q2.y- C.y)*(Q2.y- C.y);
+                if ( abs(currentRadiusSquare - gelTubeRadiusSquare) < 1) break;
+
+                if (abs(currentRadiusSquare - gelTubeRadiusSquare) > abs(lastRadiusSquare - gelTubeRadiusSquare)) {
+                    if (iterationsAfterLastChange <= 2) { //local minimum
+                        a2 = a2 - increment;
+                        increment = -increment/10;
+                    } else {
+                        increment = -increment;
+                    }
+
+                    iterationsAfterLastChange = -1;
+                }
+
+                a2 = a2 + increment;
+                lastRadiusSquare = currentRadiusSquare;
+                iterationsAfterLastChange++;
+            }
+
+            float traveledLength = __fsqrt_rd((Q2.x-Q1.x)*(Q2.x-Q1.x) + (Q2.y-Q1.y)*(Q2.y-Q1.y) + (Q2.z-Q1.z)*(Q2.z-Q1.z));
+
             // This variables are ommited because
             // bx,by,bz ={0,0,0}
             // dx,dy,dz ={1,1,1}
@@ -355,192 +385,89 @@ __global__ void kernelPixelDetector( Geometry geo,
             ku=(newSource.z< pixel1D.z)? 1.0f : -1.0f;
             
             float sum=0.0f;
-            float traveledLength;
 
-            // refraction to enter tube
-            float rayLength = __fsqrt_rd(ray.x*ray.x + ray.y*ray.y + ray.z*ray.z);
-            Point3D v1, P, n, N, v2;
+            // Point3D v1, P, n, N, v2;
 
-            // incident ray versor
-            v1.x = __fdividef(ray.x, rayLength);
-            v1.y = __fdividef(ray.y, rayLength);
-            v1.z = __fdividef(ray.z, rayLength);
+            // newSource = Q1;
+            // ray.x = Q2.x - Q1.x;
+            // ray.y = Q2.y - Q1.y;
+            // ray.z = Q2.z - Q1.z;
+
+            // // Q1.x = newSource.x;
+            // // Q1.y = newSource.y;
+            // // Q1.z = newSource.z;
+            // // Q2.x = newSource.x + ray.x;
+            // // Q2.y = newSource.y + ray.y;
+            // // Q2.z = newSource.z + ray.z;
+
+            // axm=0;
+            // aym=0;
+            // azm=0;
+            // axM=1;
+            // ayM=1;
+            // azM=1;
             
-            // P = (i, j, k) refraction point
-            P.x = Q1.x;
-            P.y = Q1.y;
-            P.z = Q1.z;
-
-            // n = (P - C) / ||P - C|| normal vector to tube surface
-            float nLength = __fsqrt_rd((P.x - C.x)*(P.x - C.x) + (P.y - C.y)*(P.y - C.y));
-            n.x = (P.x - C.x) / nLength;
-            n.y = (P.y - C.y) / nLength;
-            n.z = 0; // (P.z - C.z) / nLength
-
-            float incidenceAngle = acos(v1.x*n.x + v1.y*n.y + v1.z*n.z);
-            incidenceAngle = (incidenceAngle > PI_2) ? PI_1 - incidenceAngle : incidenceAngle;
-            float refractionAngle = asin(nWater * sin(incidenceAngle) / nGel);
-
-            // N = n x v1 normal to the plane formed by n and v1 and v2; n.z = 0
-            N.x = -n.y * v1.z;
-            N.y = n.x * v1.z;
-            N.z = v1.x * n.y - v1.y * n.x;
-
-            float cos_r = cos(refractionAngle);
-            float cos_ri = cos(incidenceAngle - refractionAngle);
+            // // am=max(max(axm,aym),azm); // 0
+            // // aM=min(min(axM,ayM),azM); // 1
+            // am=0; // 0
+            // aM=1; // 1
             
-            aux1 = v1.x*n.y*N.z - v1.y*n.x*N.z + v1.z * (n.x*N.y -n.y*N.x);
+            // // line intersects voxel space ->   am<aM
+            // if (am>=aM){
+            //     // detector[idx]=0;
+            //     return;
+            // }
 
-            v2.x = v1.x;
-            v2.y = v1.y;
-            v2.z = v1.z;
+            // if( ray.x > 0){
+            //     imin=(am==axm)? Q1.x + 1.0f             : ceilf (newSource.x+am*ray.x);
+            //     imax=(aM==axM)? Q2.x + 1.0f             : floorf(newSource.x+aM*ray.x);
+            // }else{
+            //     imax=(am==axm)? Q1.x             : floorf(newSource.x+am*ray.x);
+            //     imin=(aM==axM)? Q2.x             : ceilf (newSource.x+aM*ray.x);
+            // }
+            // // for Y
+            // if( ray.y > 0){
+            //     jmin=(am==aym)? Q1.y + 1.0f             : ceilf (newSource.y+am*ray.y);
+            //     jmax=(aM==ayM)? Q2.y + 1.0f             : floorf(newSource.y+aM*ray.y);
+            // }else{
+            //     jmax=(am==aym)? Q1.y             : floorf(newSource.y+am*ray.y);
+            //     jmin=(aM==ayM)? Q2.y             : ceilf (newSource.y+aM*ray.y);
+            // }
+            // // for Z
+            // if( ray.z > 0){
+            //     kmin=(am==azm)? Q1.z + 1.0f             : ceilf (newSource.z+am*ray.z);
+            //     kmax=(aM==azM)? Q2.z + 1.0f             : floorf(newSource.z+aM*ray.z);
+            // }else{
+            //     kmax=(am==azm)? Q1.z             : floorf(newSource.z+am*ray.z);
+            //     kmin=(aM==azM)? Q2.z             : ceilf (newSource.z+aM*ray.z);
+            // }
 
-            // normalize v2
-            float v2Length = __fsqrt_rd(v2.x*v2.x + v2.y*v2.y + v2.z*v2.z);
-            v2.x = __fdividef(v2.x,  v2Length);
-            v2.y = __fdividef(v2.y,  v2Length);
-            v2.z = __fdividef(v2.z,  v2Length);
-
-            float t;
-
-            Point3D aux;
-            aux.x = P.x - C.x;
-            aux.y = P.y - C.y;
-            aux.z = 0;
-
-            aux1 = 2 * aux.x * v2.x + 2 * aux.y * v2.y;
-            aux2 = v2.x * v2.x + v2.y * v2.y + v2.z * v2.z;
-            aux3 = (-gelTubeRadiusSquare + aux.x * aux.x + aux.y * aux.y);
-
-            // no real solutions or only 1 solution
-            if (aux1*aux1 - 4 * aux2 * aux3 < 0) return;
-
-            a1 = (-__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
-            a2 = (__fsqrt_rd(aux1*aux1 - 4 * aux2 * aux3) - aux1) / (2*aux2);
-
-            t = abs(a1) > abs(a2) ? a1 : a2;
-            // end of refraction
+            // // get intersection point N1. eq(20-21) [(also eq 9-10)]
+            // ax=(ray.x>0)?  __fdividef(imin-newSource.x,ray.x) :  __fdividef(imax-newSource.x,ray.x);
+            // ay=(ray.y>0)?  __fdividef(jmin-newSource.y,ray.y) :  __fdividef(jmax-newSource.y,ray.y);
+            // az=(ray.z>0)?  __fdividef(kmin-newSource.z,ray.z) :  __fdividef(kmax-newSource.z,ray.z);
             
-            Q2.x = P.x + t * v2.x;
-            Q2.y = P.y + t * v2.y;
-            Q2.z = P.z + t * v2.z;
-
-            increment = t/10;
-            lastRadiusSquare = (Q2.x- C.x)*(Q2.x- C.x) + (Q2.y- C.y)*(Q2.y- C.y);
-            iterationsAfterLastChange = 0;
-
-            for (int i = 0; i < 4000; i++) {
-                Q2.x = P.x + t * v2.x;
-                Q2.y = P.y + t * v2.y;
-                Q2.z = P.z + t * v2.z;
-
-                float currentRadiusSquare = (Q2.x- C.x)*(Q2.x- C.x) + (Q2.y- C.y)*(Q2.y- C.y);
-                if ( abs(currentRadiusSquare - gelTubeRadiusSquare) < 1) break;
-
-                if (abs(currentRadiusSquare - gelTubeRadiusSquare) > abs(lastRadiusSquare - gelTubeRadiusSquare)) {
-                    if (iterationsAfterLastChange <= 2) { //local minimum
-                        t = t - increment;
-                        increment = -increment/10;
-                    } else {
-                        increment = -increment;
-                    }
-                    
-                    iterationsAfterLastChange = -1;
-                }
-
-                t = t + increment;
-                lastRadiusSquare = currentRadiusSquare;
-                iterationsAfterLastChange++;
-            }
-
-            // save the ray traveled distance
-            traveledLength = t;
-
-            eps=0.000001;
-
-            // v2*t is the distance from P to the next refraction point
-            v2.x = v2.x * t;
-            v2.y = v2.y * t;
-            v2.z = v2.z * t;
+            // // If its Infinite (i.e. ray is perpendicular to this axis), make sure its positive
+            // ax=(isinf(ax))? abs(ax) : ax;
+            // ay=(isinf(ay))? abs(ay) : ay;
+            // az=(isinf(az))? abs(az) : az;    
             
-            ray = v2;
-            newSource = P; //current point
+            // // get index of first intersection. eq (26) and (19)
+            // aminc=min(min(ax,ay),az);
+            // i=floor(newSource.x+ (aminc+am)*0.5f*ray.x);
+            // j=floor(newSource.y+ (aminc+am)*0.5f*ray.y);
+            // k=floor(newSource.z+ (aminc+am)*0.5f*ray.z);
+            // // Initialize
+            // ac=am;
+            // //eq (28), unit anlges
+            // axu=__frcp_rd(abs(ray.x));
+            // ayu=__frcp_rd(abs(ray.y));
+            // azu=__frcp_rd(abs(ray.z));
 
-            Q1.x = newSource.x;
-            Q1.y = newSource.y;
-            Q1.z = newSource.z;
-            Q2.x = newSource.x + ray.x;
-            Q2.y = newSource.y + ray.y;
-            Q2.z = newSource.z + ray.z;
-
-            axm=0;
-            aym=0;
-            azm=0;
-            axM=1;
-            ayM=1;
-            azM=1;
-            
-            // am=max(max(axm,aym),azm); // 0
-            // aM=min(min(axM,ayM),azM); // 1
-            am=0; // 0
-            aM=1; // 1
-            
-            // line intersects voxel space ->   am<aM
-            if (am>=aM){
-                // detector[idx]=0;
-                return;
-            }
-
-            if( ray.x > 0){
-                imin=(am==axm)? Q1.x + 1.0f             : ceilf (newSource.x+am*ray.x);
-                imax=(aM==axM)? Q2.x + 1.0f             : floorf(newSource.x+aM*ray.x);
-            }else{
-                imax=(am==axm)? Q1.x             : floorf(newSource.x+am*ray.x);
-                imin=(aM==axM)? Q2.x             : ceilf (newSource.x+aM*ray.x);
-            }
-            // for Y
-            if( ray.y > 0){
-                jmin=(am==aym)? Q1.y + 1.0f             : ceilf (newSource.y+am*ray.y);
-                jmax=(aM==ayM)? Q2.y + 1.0f             : floorf(newSource.y+aM*ray.y);
-            }else{
-                jmax=(am==aym)? Q1.y             : floorf(newSource.y+am*ray.y);
-                jmin=(aM==ayM)? Q2.y             : ceilf (newSource.y+aM*ray.y);
-            }
-            // for Z
-            if( ray.z > 0){
-                kmin=(am==azm)? Q1.z + 1.0f             : ceilf (newSource.z+am*ray.z);
-                kmax=(aM==azM)? Q2.z + 1.0f             : floorf(newSource.z+aM*ray.z);
-            }else{
-                kmax=(am==azm)? Q1.z             : floorf(newSource.z+am*ray.z);
-                kmin=(aM==azM)? Q2.z             : ceilf (newSource.z+aM*ray.z);
-            }
-
-            // get intersection point N1. eq(20-21) [(also eq 9-10)]
-            ax=(ray.x>0)?  __fdividef(imin-newSource.x,ray.x) :  __fdividef(imax-newSource.x,ray.x);
-            ay=(ray.y>0)?  __fdividef(jmin-newSource.y,ray.y) :  __fdividef(jmax-newSource.y,ray.y);
-            az=(ray.z>0)?  __fdividef(kmin-newSource.z,ray.z) :  __fdividef(kmax-newSource.z,ray.z);
-            
-            // If its Infinite (i.e. ray is perpendicular to this axis), make sure its positive
-            ax=(isinf(ax))? abs(ax) : ax;
-            ay=(isinf(ay))? abs(ay) : ay;
-            az=(isinf(az))? abs(az) : az;    
-            
-            // get index of first intersection. eq (26) and (19)
-            aminc=min(min(ax,ay),az);
-            i=floor(newSource.x+ (aminc+am)*0.5f*ray.x);
-            j=floor(newSource.y+ (aminc+am)*0.5f*ray.y);
-            k=floor(newSource.z+ (aminc+am)*0.5f*ray.z);
-            // Initialize
-            ac=am;
-            //eq (28), unit anlges
-            axu=__frcp_rd(abs(ray.x));
-            ayu=__frcp_rd(abs(ray.y));
-            azu=__frcp_rd(abs(ray.z));
-
-            // eq(29), direction of update
-            iu=(ray.x > 0)? 1.0f : -1.0f;
-            ju=(ray.y > 0)? 1.0f : -1.0f;
-            ku=(ray.z > 0)? 1.0f : -1.0f;
+            // // eq(29), direction of update
+            // iu=(ray.x > 0)? 1.0f : -1.0f;
+            // ju=(ray.y > 0)? 1.0f : -1.0f;
+            // ku=(ray.z > 0)? 1.0f : -1.0f;
 
             unsigned long Np=(abs(imax-imin)+1)+(abs(jmax-jmin)+1)+(abs(kmax-kmin)+1); // Number of intersections
 

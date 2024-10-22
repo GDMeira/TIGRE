@@ -6,7 +6,7 @@ geofields_mandatory={'nVoxel','sVoxel','dVoxel', ...
     'DSO','DSD'};
 
 geofields_optional={'offOrigin','offDetector','rotDetector','COR',...
-    'mode','accuracy', 'EPS'};
+    'mode','accuracy', 'EPS', 'gelTubeRadius'};
 allfields=horzcat(geofields_mandatory,geofields_optional);
 fnames=fieldnames(geo);
 % Find if geo has fields we do not recongize

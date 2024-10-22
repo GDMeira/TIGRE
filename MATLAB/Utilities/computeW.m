@@ -25,3 +25,4 @@ function W=computeW(geo,angles,gpuids)
     W(W<min(geo.dVoxel)/4)=Inf;
     W=1./W;
     W(W>0.1)=0.1;
+    W(isinf(W))=0;

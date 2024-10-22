@@ -59,6 +59,7 @@ struct  Geometry {
     float *offOrigX,*offOrigY,*offOrigZ;
     float* DSO;
     float EPS;
+    float gelTubeRadius;
     // Parameters  of the Detector.
     int   nDetecU, nDetecV;
     float sDetecU, sDetecV;

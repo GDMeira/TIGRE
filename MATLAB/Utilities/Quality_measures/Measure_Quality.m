@@ -32,9 +32,13 @@ for ii=1:length(QualMeasOpts)
          
         case 'UQI'
          q=UQI(res_prev,res);
+         
         case 'error_norm'
          q=im3Dnorm(res_prev-res,'L2');
-        
+         
+        case 'PDP'
+         [PDPi, PDPt] = getImageAndTheoricalPDP(res);
+         q=RMSE(PDPt,PDPi);
     end
     
     

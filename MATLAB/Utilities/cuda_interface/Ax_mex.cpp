@@ -105,14 +105,14 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, mxArray const* prhs[]) {
     const mwSize* size_img = mxGetDimensions(image);
 
     mxArray* geometryMex = (mxArray*)prhs[1];
-    const char* fieldnames[15] = {
+    const char* fieldnames[16] = {
         "nVoxel", "sVoxel", "dVoxel", "nDetector", "sDetector",
         "dDetector", "DSD", "DSO", "offOrigin", "offDetector",
-        "accuracy", "mode", "COR", "rotDetector", "EPS"
+        "accuracy", "mode", "COR", "rotDetector", "EPS", "gelTubeRadius"
     };
 
     double* nVoxel, * nDetec, * sVoxel, * dVoxel, * sDetec, * dDetec, * DSO, * DSD, * EPS;
-    double* offOrig, * offDetec, * rotDetector, * acc, * COR;
+    double* offOrig, * offDetec, * rotDetector, * acc, * COR, * gelTubeRadius;
     const char* mode;
     int c;
     mxArray* tmp;
@@ -120,7 +120,7 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, mxArray const* prhs[]) {
     geo.unitX = 1; geo.unitY = 1; geo.unitZ = 1;
     bool coneBeam = true;
 
-    for (int ifield = 0; ifield < 15; ifield++) {
+    for (int ifield = 0; ifield < 16; ifield++) {
         tmp = mxGetField(geometryMex, 0, fieldnames[ifield]);
         if (tmp == NULL) {
             mexErrMsgIdAndTxt("CBCT:MEX:Ax:InvalidInput", "Missing field in geometry struct.");
@@ -229,6 +229,10 @@ void mexFunction(int nlhs, mxArray* plhs[], int nrhs, mxArray const* prhs[]) {
         case 14:
             EPS = (double*)mxGetData(tmp);
             geo.EPS = (float)*EPS;
+            break;
+        case 15:
+            gelTubeRadius = (double*)mxGetData(tmp);
+            geo.gelTubeRadius = (float)gelTubeRadius[0];
             break;
         default:
             mexErrMsgIdAndTxt("CBCT:MEX:Ax:unknown", "This should not happen. Weird");

@@ -118,7 +118,7 @@ __constant__ Point3D projParamsArrayDev[6*PROJ_PER_KERNEL];  // Dev means it is 
 // Point3D projParamsArrayHost[6*PROJ_PER_KERNEL];   // Host means it is host memory
 
 // Now we also need to store sinAlpha and cosAlpha for each projection (two floats per projection)
-__constant__ float projSinCosArrayDev[6*PROJ_PER_KERNEL];
+__constant__ float projSinCosArrayDev[7*PROJ_PER_KERNEL];
 
 
 
@@ -155,10 +155,13 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
      */
     unsigned long long indY = blockIdx.y * blockDim.y + threadIdx.y;
     unsigned long long indX = blockIdx.x * blockDim.x + threadIdx.x;
+    float gelTubeRadius = projSinCosArrayDev[6];
+    indX += geo.nVoxelX/2 - gelTubeRadius/geo.dVoxelX;
+    indY += geo.nVoxelY/2 - gelTubeRadius/geo.dVoxelY;
     // unsigned long startIndZ = blockIdx.z * blockDim.z + threadIdx.z;  // This is only STARTING z index of the column of voxels that the thread will handle
     unsigned long long startIndZ = blockIdx.z * VOXELS_PER_THREAD + threadIdx.z;  // This is only STARTING z index of the column of voxels that the thread will handle
     //Make sure we don't go out of bounds
-    if (indX>=geo.nVoxelX || indY>=geo.nVoxelY || startIndZ>=geo.nVoxelZ)
+    if (indX>=geo.nVoxelX || indY>=geo.nVoxelY || startIndZ>=geo.nVoxelZ || (indX-(geo.nVoxelX-1)/2)*(indX-(geo.nVoxelX-1)/2)+(indY-(geo.nVoxelY-1)/2)*(indY-(geo.nVoxelY-1)/2)>gelTubeRadius/geo.dVoxelX*gelTubeRadius/geo.dVoxelX)
         return;
     
     // We'll keep a local auxiliary array of values of a column of voxels that this thread will update
@@ -200,12 +203,12 @@ __global__ void kernelPixelBackprojectionFDK(const Geometry geo, float* image,co
         Point3D xyzOffset = projParamsArrayDev[6*projNumber+4];
         Point3D S = projParamsArrayDev[6*projNumber+5];
         
-        float sinalpha = projSinCosArrayDev[6*projNumber];     // 2*projNumber because we have 2 float (sin or cos angle) values per projection
-        float cosalpha = projSinCosArrayDev[6*projNumber+1];
-        float COR = projSinCosArrayDev[6*projNumber+2];
-        float DSD = projSinCosArrayDev[6*projNumber+3];
-        float DSO = projSinCosArrayDev[6*projNumber+4];
-        float EPS = projSinCosArrayDev[6 * projNumber + 5];
+        float sinalpha = projSinCosArrayDev[7*projNumber];     // 2*projNumber because we have 2 float (sin or cos angle) values per projection
+        float cosalpha = projSinCosArrayDev[7*projNumber+1];
+        float COR = projSinCosArrayDev[7*projNumber+2];
+        float DSD = projSinCosArrayDev[7*projNumber+3];
+        float DSO = projSinCosArrayDev[7*projNumber+4];
+        float EPS = projSinCosArrayDev[7 * projNumber + 5];
         
         float auxCOR=COR/geo.dDetecU;
         // Now iterate through Z in our voxel column FOR A GIVEN PROJECTION
@@ -394,7 +397,7 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
     Point3D* projParamsArrayHost;
     cudaMallocHost((void**)&projParamsArrayHost,6*PROJ_PER_KERNEL*sizeof(Point3D));
     float* projSinCosArrayHost;
-    cudaMallocHost((void**)&projSinCosArrayHost,6*PROJ_PER_KERNEL*sizeof(float));
+    cudaMallocHost((void**)&projSinCosArrayHost,7*PROJ_PER_KERNEL*sizeof(float));
     
     
     // Texture object variables
@@ -493,15 +496,18 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                     // I tried different sizes and shapes of blocks (tiles), but it does not appear to significantly affect throughput, so
                     // let's stick with the values from Zinsser and Keck.
                     divx=16;
-                    divy=32;
+                    divy=16;
                     divz=VOXELS_PER_THREAD;      // We now only have 32 x 16 threads per block (flat tile, see below), BUT each thread works on a Z column of VOXELS_PER_THREAD voxels, so we effectively need fewer blocks!
                     
                     
-                    dim3 grid((geo.nVoxelX+divx-1)/divx,
-                            (geo.nVoxelY+divy-1)/divy,
-                            (geoArray[img_slice*deviceCount+dev].nVoxelZ+divz-1)/divz);
+                                        // dim3 blocks(ceilf((geo.nVoxelX+divx-1)/divx),
+                    //         ceilf((geo.nVoxelY+divy-1)/divy),
+                    //         ceilf((geoArray[img_slice*deviceCount+dev].nVoxelZ+divz-1)/divz));
+                    dim3 blocks(ceilf((2*geo.gelTubeRadius/geo.dVoxelX+divx-1)/divx),
+                            ceilf((2*geo.gelTubeRadius/geo.dVoxelY+divy-1)/divy),
+                            ceilf((geoArray[img_slice*deviceCount+dev].nVoxelZ+divz-1)/divz));
                     
-                    dim3 block(divx,divy,1);    // Note that we have 1 in the Z size, not divz, since each thread works on a vertical set of VOXELS_PER_THREAD voxels (so we only need a "flat" tile of threads, with depth of 1)
+                    dim3 threadsPerBlock(divx,divy,1);     // Note that we have 1 in the Z size, not divz, since each thread works on a vertical set of VOXELS_PER_THREAD voxels (so we only need a "flat" tile of threads, with depth of 1)
                     //////////////////////////////////////////////////////////////////////////////////////
                     // Main reconstruction loop: go through projections (rotation angles) and backproject
                     //////////////////////////////////////////////////////////////////////////////////////
@@ -538,12 +544,13 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                             sinalpha=sin(geoArray[img_slice*deviceCount+dev].alpha);
                             cosalpha=cos(geoArray[img_slice*deviceCount+dev].alpha);
                             
-                            projSinCosArrayHost[6*j]=sinalpha;  // 2*j because we have 2 float (sin or cos angle) values per projection
-                            projSinCosArrayHost[6*j+1]=cosalpha;
-                            projSinCosArrayHost[6*j+2]=geo.COR[currProjNumber_global];
-                            projSinCosArrayHost[6*j+3]=geo.DSD[currProjNumber_global];
-                            projSinCosArrayHost[6*j+4]=geo.DSO[currProjNumber_global];
-                            projSinCosArrayHost[6 * j + 5] = geo.EPS;
+                            projSinCosArrayHost[7*j]=sinalpha;  // 2*j because we have 2 float (sin or cos angle) values per projection
+                            projSinCosArrayHost[7*j+1]=cosalpha;
+                            projSinCosArrayHost[7*j+2]=geo.COR[currProjNumber_global];
+                            projSinCosArrayHost[7*j+3]=geo.DSD[currProjNumber_global];
+                            projSinCosArrayHost[7*j+4]=geo.DSO[currProjNumber_global];
+                            projSinCosArrayHost[7 * j + 5] = geo.EPS;
+                            projSinCosArrayHost[7 * j + 6] = geo.gelTubeRadius;
                             
                             computeDeltasCube(geoArray[img_slice*deviceCount+dev],currProjNumber_global,&xyzOrigin,&deltaX,&deltaY,&deltaZ,&source);
                             
@@ -560,11 +567,11 @@ int voxel_backprojection(float  *  projections, Geometry geo, float* result,floa
                         }   // END for (preparing params for kernel call)
                         
                         // Copy the prepared parameter arrays to constant memory to make it available for the kernel
-                        cudaMemcpyToSymbolAsync(projSinCosArrayDev, projSinCosArrayHost, sizeof(float)*6*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
+                        cudaMemcpyToSymbolAsync(projSinCosArrayDev, projSinCosArrayHost, sizeof(float)*7*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
                         cudaMemcpyToSymbolAsync(projParamsArrayDev, projParamsArrayHost, sizeof(Point3D)*6*PROJ_PER_KERNEL,0,cudaMemcpyHostToDevice,stream[dev*nStreamDevice]);
                         cudaStreamSynchronize(stream[dev*nStreamDevice]);
                         
-                        kernelPixelBackprojectionFDK<<<grid,block,0,stream[dev*nStreamDevice]>>>(geoArray[img_slice*deviceCount+dev],dimage[dev],i,proj_split_size[proj_block_split],texProj[(proj_block_split%2)*deviceCount+dev]);
+                        kernelPixelBackprojectionFDK<<<blocks,threadsPerBlock,0,stream[dev*nStreamDevice]>>>(geoArray[img_slice*deviceCount+dev],dimage[dev],i,proj_split_size[proj_block_split],texProj[(proj_block_split%2)*deviceCount+dev]);
                     }  // END for
                     //////////////////////////////////////////////////////////////////////////////////////
                     // END RB code, Main reconstruction loop: go through projections (rotation angles) and backproject
